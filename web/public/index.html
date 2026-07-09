@@ -3,57 +3,76 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark light">
+  <meta name="color-scheme" content="light dark">
   <title>Living Dex</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='white' stroke='black' stroke-width='6'/><path d='M4 50h38a8 8 0 0 0 16 0h38' fill='none' stroke='black' stroke-width='6'/><path d='M4 50a46 46 0 0 1 92 0H62a12 12 0 0 0-24 0Z' fill='%23e3350d'/><circle cx='50' cy='50' r='11' fill='white' stroke='black' stroke-width='5'/></svg>">
 </head>
 <body>
   <!--
-    Placeholder front-end. The Claude Design deliverable replaces web/public/
-    wholesale; it only needs to speak the /api contract (see README §API).
+    Production front-end — an implementation of the Claude Design deliverable
+    "Living Dex Tracker.dc.html" (project 2258ee1c). The DC-framework prototype
+    is reproduced here as a dependency-free SPA wired to the app's own /api:
+    catch state is server-backed (POST /api/status), entries come from
+    GET /api/entries. Structure is built by app.js.
   -->
-  <header class="topbar">
-    <h1>Living Dex</h1>
-    <div class="progress" role="status" aria-live="polite">
-      <span id="summary-count">…</span>
-      <div class="bar"><div id="summary-bar" class="bar-fill" style="width:0%"></div></div>
-      <span id="summary-pct"></span>
-    </div>
-    <div class="io">
-      <a class="btn" href="/api/export" download>Export CSV</a>
-      <label class="btn" for="import-file">Import CSV<input id="import-file" type="file" accept=".csv,text/csv" hidden></label>
-    </div>
-  </header>
+  <div id="app">
+    <header class="topbar">
+      <div class="topbar-row">
+        <div class="brand">
+          <span class="pokeball" aria-hidden="true"></span>
+          <span class="wordmark">LIVING DEX</span>
+          <span class="region" id="region">—</span>
+        </div>
+        <div class="spacer"></div>
+        <div class="counts" id="counts">
+          <span class="count-caught" id="caught">0</span>
+          <span class="count-total" id="total">/ 0</span>
+          <span class="count-pct" id="pct">0%</span>
+        </div>
+        <div class="io">
+          <a class="hbtn" id="export" href="/api/export" download>Export</a>
+          <label class="hbtn" for="import-file">Import<input id="import-file" type="file" accept=".csv,text/csv" hidden></label>
+          <button class="hbtn" id="theme-btn" type="button" title="Theme">◐ Auto</button>
+        </div>
+      </div>
 
-  <nav class="filters" aria-label="Filters">
-    <input id="f-q" type="search" placeholder="Search name, form, key…" aria-label="Search">
-    <select id="f-gen" aria-label="Generation">
-      <option value="">All gens</option>
-    </select>
-    <select id="f-type" aria-label="Type">
-      <option value="">All types</option>
-    </select>
-    <select id="f-status" aria-label="Caught status">
-      <option value="">All</option>
-      <option value="caught">Caught</option>
-      <option value="uncaught">Uncaught</option>
-    </select>
-    <span id="result-count" class="count" role="status"></span>
-  </nav>
+      <div class="progress" id="progress" role="img" aria-label="Progress"></div>
 
-  <p id="message" class="message" hidden></p>
-  <main id="grid" class="grid" aria-label="Dex entries"></main>
+      <div class="filter-row">
+        <div class="gen-chips" id="gen-chips" role="group" aria-label="Generation filter"></div>
+        <div class="status-chips" id="status-chips" role="group" aria-label="Status filter"></div>
+        <div class="spacer"></div>
+        <input class="search" id="search" type="search" aria-label="Search by name or dex number" placeholder="Search name or #">
+      </div>
 
-  <template id="card-template">
-    <button class="card" type="button" aria-pressed="false">
-      <img class="sprite" loading="lazy" width="96" height="96" alt="">
-      <span class="dex"></span>
-      <span class="name"></span>
-      <span class="form"></span>
-      <span class="meta"><span class="gender"></span><span class="badges"></span></span>
-    </button>
-  </template>
+      <div class="type-row" id="type-chips" role="group" aria-label="Type filter"></div>
+    </header>
+
+    <main class="main">
+      <div class="loading" id="loading" hidden>
+        <span class="spinner"></span> LOADING DEX DATA…
+        <div class="skeleton-grid" id="skeleton"></div>
+      </div>
+
+      <div class="empty" id="empty" hidden>
+        <span class="empty-mark"><span></span></span>
+        <span class="empty-title" id="empty-title"></span>
+        <span class="empty-body" id="empty-body"></span>
+        <button class="empty-action" id="empty-action" type="button"></button>
+      </div>
+
+      <div class="results" id="results" hidden>
+        <div class="result-label" id="result-label"></div>
+        <div class="grid" id="grid"></div>
+      </div>
+    </main>
+
+    <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+  </div>
 
   <script src="app.js"></script>
 </body>

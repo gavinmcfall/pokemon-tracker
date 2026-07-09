@@ -18,7 +18,7 @@ server-side from PokéAPI, and the browser only ever talks to the app's own API.
 |---|---|---|
 | `src/app.ts` + `src/server.ts` | Hono API (Node 22, TypeScript) | `ghcr.io/gavinmcfall/livingdex-api` |
 | `src/seed/` | Idempotent PokéAPI seed (same image, `node dist/seed/run.js`) | same image |
-| `web/` | Static SPA + nginx `/api` proxy (placeholder until the Claude Design front-end lands) | `ghcr.io/gavinmcfall/livingdex-web` |
+| `web/` | Static SPA (implements the Claude Design deliverable) + nginx `/api` proxy | `ghcr.io/gavinmcfall/livingdex-web` |
 | `migrations/` | Postgres schema, applied automatically on api/seed boot | — |
 | `deploy/` | Flux-ready manifests for the home-ops cluster (CNPG, bjw-s app-template, HTTPRoute) | see `deploy/README.md` |
 
@@ -53,6 +53,34 @@ CSV import matches rows by `entryKey` when present, otherwise by `dex`
 (+ optional `form`, `gender` columns — a flat one-row-per-species sheet marks
 every matching slot). Unmatched rows are reported, never fatal. Header aliases
 like `National Dex`, `Owned`, `Game` are recognized.
+
+## Front-end (`web/public/`)
+
+An implementation of the Claude Design deliverable *Living Dex Tracker*
+(project `2258ee1c`). The DC-framework design prototype is reproduced as a
+dependency-free static SPA (no build step) wired to the API instead of its
+mock data + localStorage:
+
+- **Generation-scoped view** — the header count, progress mosaic and Needed/Caught
+  chips reflect the selected generation (the region shown beside the wordmark).
+- **Progress mosaic** — one bar segment per primary type that has returned to the
+  dex, coloured by type.
+- **Filters** — generation chips, All/Needed/Caught, a multi-select type row, and
+  name/`#dex` search; all client-side over the full catalogue for instant response.
+- **Type-tinted tiles** — caught entries fill with their primary type's colour and
+  carry a secondary-type accent; needed entries are greyscale. Catch state is
+  **server-backed** (`POST /api/status`) with an optimistic update, not localStorage.
+- **Theming** — light/dark via CSS `light-dark()`; a header button cycles
+  auto → light → dark (persisted). Reduced-motion, keyboard operation, 44px touch
+  targets and focus rings are carried over from the design.
+- CSV **Import/Export** buttons wire the §6 sheet round-trip into the header.
+
+Replacing it is a drop-in: overwrite `web/public/` and keep speaking the API above.
+Notes: sprites and the Google font load from the internet (matching the design; a
+system-ui fallback keeps it usable offline — mirror both if you want a fully
+offline LAN app). Catch metadata (`gameOrigin`/`method`/`notes`) is stored and
+CSV-importable but the design surfaces only the binary catch toggle; a metadata
+editor is a future addition.
 
 ## Seed
 
@@ -118,9 +146,12 @@ npm run test:e2e         # Playwright: desktop lane + "serina" lane (Pixel 7,
   Minior, Mimikyu…).
 - Seed idempotency, uniqueness and gender/form edge cases per spec §8 are
   covered in `test/expand.test.ts`; CSV round-trip in `test/csv.test.ts`.
-- The e2e "serina" lane already caught one real bug (disabled-button focus
-  loss breaking keyboard toggling). Port the full SCBridge multi-persona pack
-  when the real front-end lands.
+- `e2e/smoke.spec.ts` drives the real front-end against the API (gen scoping,
+  catch toggle + persistence across reload, filters, empty state, dex search,
+  keyboard-only toggling, theme cycle, no mobile overflow). The "serina" lane
+  already caught two real bugs — disabled-button focus loss breaking keyboard
+  toggling, and `[hidden]` losing to a `display:flex` rule. Port the full
+  SCBridge multi-persona pack to broaden this lane.
 
 CI (GitHub Actions) runs typecheck, the full test suite against a Postgres 16
 service, both e2e lanes, then builds and (on `main`) pushes both images to GHCR
