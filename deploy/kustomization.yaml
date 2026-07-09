@@ -1,0 +1,9 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - pg-cluster.yaml
+  - helmrelease.yaml
+  - httproute.yaml
+  # seed-job.yaml is applied manually once — see deploy/README.md

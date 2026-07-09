@@ -1,0 +1,9 @@
+node_modules
+dist
+.pokeapi-cache
+.git
+test-results
+playwright-report
+deploy
+docs
+*.md

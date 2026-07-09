@@ -1,0 +1,8 @@
+# livingdex-web: nginx serving the static front-end, proxying /api.
+# When the Claude Design front-end has a build step, add a build stage here
+# and COPY its output instead of web/public.
+FROM nginx:1.27-alpine
+ENV API_UPSTREAM=livingdex-api:8080
+COPY web/nginx/default.conf.template /etc/nginx/templates/default.conf.template
+COPY web/public /usr/share/nginx/html
+EXPOSE 80

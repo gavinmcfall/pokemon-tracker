@@ -1,0 +1,253 @@
+import pg from 'pg';
+import { readdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Entry, EntryFilters, EntryWithStatus, Status, StatusPatch, Summary } from '../types.js';
+import type { Store, UpsertResult } from './store.js';
+
+const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
+
+interface EntryRow {
+  entry_key: string;
+  dex: number;
+  name: string;
+  form_slug: string;
+  form_label: string | null;
+  gender: Entry['gender'];
+  types: string[];
+  generation: number;
+  sprite_url: string;
+  is_cosmetic: boolean;
+  s_caught: boolean | null;
+  s_caught_at: Date | null;
+  s_game_origin: string | null;
+  s_method: string | null;
+  s_notes: string | null;
+}
+
+function rowToEntry(row: EntryRow): EntryWithStatus {
+  return {
+    entryKey: row.entry_key,
+    dex: row.dex,
+    name: row.name,
+    formSlug: row.form_slug,
+    formLabel: row.form_label,
+    gender: row.gender,
+    types: row.types,
+    generation: row.generation,
+    spriteUrl: row.sprite_url,
+    isCosmetic: row.is_cosmetic,
+    status: row.s_caught === null ? null : {
+      entryKey: row.entry_key,
+      caught: row.s_caught,
+      caughtAt: row.s_caught_at ? row.s_caught_at.toISOString() : null,
+      gameOrigin: row.s_game_origin,
+      method: row.s_method,
+      notes: row.s_notes,
+    },
+  };
+}
+
+const BASE_SELECT = `
+  select e.entry_key, e.dex, e.name, e.form_slug, e.form_label, e.gender,
+         e.types, e.generation, e.sprite_url, e.is_cosmetic,
+         s.caught as s_caught, s.caught_at as s_caught_at,
+         s.game_origin as s_game_origin, s.method as s_method, s.notes as s_notes
+  from entries e
+  left join status s using (entry_key)
+`;
+
+const ORDER_BY = `
+  order by e.dex,
+           case when e.form_slug = 'default' then 0 else 1 end,
+           e.form_slug,
+           case e.gender when 'male' then 0 when 'female' then 1 else 2 end
+`;
+
+export class PgStore implements Store {
+  private pool: pg.Pool;
+
+  constructor(databaseUrl: string) {
+    this.pool = new pg.Pool({ connectionString: databaseUrl, max: 10 });
+  }
+
+  async migrate(): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query(
+        'create table if not exists schema_migrations (name text primary key, applied_at timestamptz not null default now())',
+      );
+      const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
+      for (const file of files) {
+        await client.query('begin');
+        try {
+          // Serialize concurrent migrators (api boot + seed job racing at install time).
+          await client.query('select pg_advisory_xact_lock(727566)');
+          const { rowCount } = await client.query('select 1 from schema_migrations where name = $1', [file]);
+          if (!rowCount) {
+            const sql = await readFile(path.join(MIGRATIONS_DIR, file), 'utf8');
+            await client.query(sql);
+            await client.query('insert into schema_migrations (name) values ($1)', [file]);
+          }
+          await client.query('commit');
+        } catch (err) {
+          await client.query('rollback');
+          throw err;
+        }
+      }
+    } finally {
+      client.release();
+    }
+  }
+
+  async upsertEntries(entries: Entry[]): Promise<UpsertResult> {
+    const result: UpsertResult = { inserted: 0, updated: 0, unchanged: 0 };
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      for (const e of entries) {
+        const res = await client.query<{ inserted: boolean }>(
+          `insert into entries (entry_key, dex, name, form_slug, form_label, gender, types, generation, sprite_url, is_cosmetic)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           on conflict (entry_key) do update set
+             dex = excluded.dex, name = excluded.name, form_slug = excluded.form_slug,
+             form_label = excluded.form_label, gender = excluded.gender, types = excluded.types,
+             generation = excluded.generation, sprite_url = excluded.sprite_url,
+             is_cosmetic = excluded.is_cosmetic, updated_at = now()
+           where (entries.dex, entries.name, entries.form_slug, entries.form_label, entries.gender,
+                  entries.types, entries.generation, entries.sprite_url, entries.is_cosmetic)
+             is distinct from
+                 (excluded.dex, excluded.name, excluded.form_slug, excluded.form_label, excluded.gender,
+                  excluded.types, excluded.generation, excluded.sprite_url, excluded.is_cosmetic)
+           returning (xmax = 0) as inserted`,
+          [e.entryKey, e.dex, e.name, e.formSlug, e.formLabel, e.gender, e.types, e.generation, e.spriteUrl, e.isCosmetic],
+        );
+        const row = res.rows[0];
+        if (!row) result.unchanged += 1;        // conflict + WHERE false → no row returned
+        else if (row.inserted) result.inserted += 1;
+        else result.updated += 1;
+      }
+      await client.query('commit');
+      return result;
+    } catch (err) {
+      await client.query('rollback');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listEntries(filters: EntryFilters): Promise<EntryWithStatus[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (filters.gen !== undefined) {
+      params.push(filters.gen);
+      where.push(`e.generation = $${params.length}`);
+    }
+    if (filters.type !== undefined) {
+      params.push(filters.type.toLowerCase());
+      where.push(`$${params.length} = any(e.types)`);
+    }
+    if (filters.status === 'caught') where.push('s.caught is true');
+    if (filters.status === 'uncaught') where.push('coalesce(s.caught, false) = false');
+    if (filters.q !== undefined && filters.q !== '') {
+      params.push(`%${escapeLike(filters.q)}%`);
+      where.push(`(e.name ilike $${params.length} or e.form_label ilike $${params.length} or e.entry_key ilike $${params.length})`);
+    }
+    const sql = BASE_SELECT + (where.length ? ` where ${where.join(' and ')}` : '') + ORDER_BY;
+    const res = await this.pool.query<EntryRow>(sql, params);
+    return res.rows.map(rowToEntry);
+  }
+
+  async listEntryKeys(): Promise<Set<string>> {
+    const res = await this.pool.query<{ entry_key: string }>('select entry_key from entries');
+    return new Set(res.rows.map((r) => r.entry_key));
+  }
+
+  async getSummary(gen?: number): Promise<Summary> {
+    const params: unknown[] = [];
+    let where = '';
+    if (gen !== undefined) {
+      params.push(gen);
+      where = ` where e.generation = $${params.length}`;
+    }
+    const totals = await this.pool.query<{ caught: string; total: string }>(
+      `select count(*) filter (where s.caught) as caught, count(*) as total
+       from entries e left join status s using (entry_key)${where}`,
+      params,
+    );
+    const byType = await this.pool.query<{ type: string; caught: string; total: string }>(
+      `select t.type, count(*) filter (where s.caught) as caught, count(*) as total
+       from entries e
+       cross join lateral unnest(e.types) as t(type)
+       left join status s using (entry_key)${where}
+       group by t.type order by t.type`,
+      params,
+    );
+    const caught = Number(totals.rows[0]?.caught ?? 0);
+    const total = Number(totals.rows[0]?.total ?? 0);
+    return {
+      caught,
+      total,
+      pct: total === 0 ? 0 : Math.round((caught / total) * 1000) / 10,
+      byType: byType.rows.map((r) => ({ type: r.type, caught: Number(r.caught), total: Number(r.total) })),
+    };
+  }
+
+  async setStatus(patch: StatusPatch): Promise<Status | null> {
+    const res = await this.pool.query<{
+      entry_key: string; caught: boolean; caught_at: Date | null;
+      game_origin: string | null; method: string | null; notes: string | null;
+    }>(
+      `insert into status (entry_key, caught, caught_at, game_origin, method, notes)
+       select $1, $2,
+              case when $2 then now() end,
+              $3::text, $4::text, $5::text
+       where exists (select 1 from entries where entry_key = $1)
+       on conflict (entry_key) do update set
+         caught = excluded.caught,
+         caught_at = case
+           when not excluded.caught then null
+           when status.caught then status.caught_at
+           else now()
+         end,
+         game_origin = case when $6 then excluded.game_origin else status.game_origin end,
+         method      = case when $7 then excluded.method      else status.method      end,
+         notes       = case when $8 then excluded.notes       else status.notes       end,
+         updated_at = now()
+       returning entry_key, caught, caught_at, game_origin, method, notes`,
+      [
+        patch.entryKey,
+        patch.caught,
+        patch.gameOrigin ?? null,
+        patch.method ?? null,
+        patch.notes ?? null,
+        patch.gameOrigin !== undefined,
+        patch.method !== undefined,
+        patch.notes !== undefined,
+      ],
+    );
+    const row = res.rows[0];
+    if (!row) return null;
+    return {
+      entryKey: row.entry_key,
+      caught: row.caught,
+      caughtAt: row.caught_at ? row.caught_at.toISOString() : null,
+      gameOrigin: row.game_origin,
+      method: row.method,
+      notes: row.notes,
+    };
+  }
+
+  async ready(): Promise<void> {
+    await this.pool.query('select 1');
+  }
+
+  async close(): Promise<void> {
+    await this.pool.end();
+  }
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}

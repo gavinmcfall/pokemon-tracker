@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>Living Dex</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='white' stroke='black' stroke-width='6'/><path d='M4 50h38a8 8 0 0 0 16 0h38' fill='none' stroke='black' stroke-width='6'/><path d='M4 50a46 46 0 0 1 92 0H62a12 12 0 0 0-24 0Z' fill='%23e3350d'/><circle cx='50' cy='50' r='11' fill='white' stroke='black' stroke-width='5'/></svg>">
+</head>
+<body>
+  <!--
+    Placeholder front-end. The Claude Design deliverable replaces web/public/
+    wholesale; it only needs to speak the /api contract (see README §API).
+  -->
+  <header class="topbar">
+    <h1>Living Dex</h1>
+    <div class="progress" role="status" aria-live="polite">
+      <span id="summary-count">…</span>
+      <div class="bar"><div id="summary-bar" class="bar-fill" style="width:0%"></div></div>
+      <span id="summary-pct"></span>
+    </div>
+    <div class="io">
+      <a class="btn" href="/api/export" download>Export CSV</a>
+      <label class="btn" for="import-file">Import CSV<input id="import-file" type="file" accept=".csv,text/csv" hidden></label>
+    </div>
+  </header>
+
+  <nav class="filters" aria-label="Filters">
+    <input id="f-q" type="search" placeholder="Search name, form, key…" aria-label="Search">
+    <select id="f-gen" aria-label="Generation">
+      <option value="">All gens</option>
+    </select>
+    <select id="f-type" aria-label="Type">
+      <option value="">All types</option>
+    </select>
+    <select id="f-status" aria-label="Caught status">
+      <option value="">All</option>
+      <option value="caught">Caught</option>
+      <option value="uncaught">Uncaught</option>
+    </select>
+    <span id="result-count" class="count" role="status"></span>
+  </nav>
+
+  <p id="message" class="message" hidden></p>
+  <main id="grid" class="grid" aria-label="Dex entries"></main>
+
+  <template id="card-template">
+    <button class="card" type="button" aria-pressed="false">
+      <img class="sprite" loading="lazy" width="96" height="96" alt="">
+      <span class="dex"></span>
+      <span class="name"></span>
+      <span class="form"></span>
+      <span class="meta"><span class="gender"></span><span class="badges"></span></span>
+    </button>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

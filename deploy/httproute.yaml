@@ -1,0 +1,19 @@
+---
+# Gateway API route (Envoy Gateway). Everything goes to web; nginx proxies /api
+# to the api service internally, keeping one origin (no CORS).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: livingdex
+  namespace: livingdex
+spec:
+  hostnames:
+    - livingdex.example.com # ADJUST: e.g. livingdex.${SECRET_DOMAIN}
+  parentRefs:
+    - name: internal # ADJUST: your Gateway name (internal = LAN-only; use the external/tunnel gateway to expose it)
+      namespace: kube-system # ADJUST: your Gateway namespace
+      sectionName: https
+  rules:
+    - backendRefs:
+        - name: livingdex-web
+          port: 80

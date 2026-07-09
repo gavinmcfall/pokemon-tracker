@@ -1,0 +1,20 @@
+---
+# CloudNative-PG cluster. Generates the `livingdex-pg-app` secret whose `uri`
+# key the api and seed consume as DATABASE_URL.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: livingdex-pg
+  namespace: livingdex
+spec:
+  instances: 1 # single-owner homelab app; bump to 2 if you want HA
+  primaryUpdateMethod: switchover
+  storage:
+    size: 5Gi
+    storageClass: ceph-block # ADJUST: your Rook-Ceph block storage class
+  bootstrap:
+    initdb:
+      database: livingdex
+      owner: livingdex
+  # ADJUST: add your standard backup stanza (barmanObjectStore / plugin) here,
+  # matching the other CNPG clusters in the repo.

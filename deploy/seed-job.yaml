@@ -1,0 +1,36 @@
+---
+# One-shot initial catalogue seed. Apply manually once after first install:
+#   kubectl apply -f seed-job.yaml && kubectl -n livingdex logs -f job/livingdex-seed-initial
+# The weekly CronJob (HelmRelease `seed` controller) takes over from there.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: livingdex-seed-initial
+  namespace: livingdex
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: ghcr.io/gavinmcfall/livingdex-api:latest # ADJUST: pin to CI sha tag
+          command: ["node", "dist/seed/run.js"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: livingdex-pg-app
+                  key: uri
+            - name: SEED_TIER
+              value: full
+            - name: SEED_CACHE_DIR
+              value: /cache
+          volumeMounts:
+            - name: cache
+              mountPath: /cache
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: livingdex-seed-cache
