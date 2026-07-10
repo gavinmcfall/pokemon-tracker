@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
 import type { Store } from './store/store.js';
-import type { EntryFilters, StatusPatch } from './types.js';
+import type { EntryFilters, EntryWithStatus, StatusPatch } from './types.js';
 import { exportCsv, planImport } from './csv.js';
+import type { SpriteMirror } from './sprites.js';
+
+export interface AppOptions {
+  /** When set, sprites are mirrored locally and entry sprite URLs are rewritten. */
+  sprites?: SpriteMirror;
+}
 
 const MAX_TEXT_FIELD = 2_000;
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
@@ -43,8 +49,12 @@ function textField(value: unknown, name: string): string | null | undefined | { 
   return value;
 }
 
-export function createApp(store: Store): Hono {
+export function createApp(store: Store, options: AppOptions = {}): Hono {
   const app = new Hono();
+  const sprites = options.sprites;
+
+  const withSprites = (entries: EntryWithStatus[]): EntryWithStatus[] =>
+    sprites ? entries.map((e) => ({ ...e, spriteUrl: sprites.rewrite(e.spriteUrl) })) : entries;
 
   app.get('/healthz', (c) => c.json({ ok: true }));
 
@@ -65,7 +75,7 @@ export function createApp(store: Store): Hono {
       q: c.req.query('q'),
     });
     if ('error' in filters) return badRequest(filters.error);
-    return c.json(await store.listEntries(filters));
+    return c.json(withSprites(await store.listEntries(filters)));
   });
 
   app.get('/api/summary', async (c) => {
@@ -137,6 +147,33 @@ export function createApp(store: Store): Hono {
     return c.body(exportCsv(entries), 200, {
       'content-type': 'text/csv; charset=utf-8',
       'content-disposition': 'attachment; filename="livingdex-export.csv"',
+    });
+  });
+
+  // ---- Sprite mirror (optional; enabled when SPRITE_DIR is set) -------------
+  app.get('/api/sprites/status', (c) => {
+    if (!sprites) return c.json({ enabled: false, running: false, total: 0, mirrored: 0, fetched: 0, failed: 0, startedAt: null, finishedAt: null, lastError: null });
+    return c.json(sprites.progress());
+  });
+
+  app.post('/api/sprites/mirror', async (c) => {
+    if (!sprites) return c.json({ error: 'sprite mirroring is not enabled (SPRITE_DIR unset)' }, 501);
+    if (sprites.isRunning()) return c.json(sprites.progress(), 202);
+    const entries = await store.listEntries({});
+    const urls = entries.map((e) => e.spriteUrl);
+    // Kick off in the background; clients poll GET /api/sprites/status.
+    void sprites.run(urls);
+    return c.json(sprites.progress(), 202);
+  });
+
+  app.get('/api/sprites/:key', async (c) => {
+    if (!sprites) return c.json({ error: 'not enabled' }, 404);
+    const file = await sprites.fileStream(c.req.param('key'));
+    if (!file) return c.json({ error: 'not mirrored' }, 404);
+    return c.body(file.stream as unknown as ReadableStream, 200, {
+      'content-type': 'image/png',
+      'cache-control': 'public, max-age=31536000, immutable',
+      'content-length': String(file.size),
     });
   });
 

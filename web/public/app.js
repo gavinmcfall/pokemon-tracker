@@ -456,6 +456,48 @@ async function onImport(file) {
   }
 }
 
+/* ---------- sprite mirror ---------- */
+function paintMirror(status) {
+  if (!status || !status.enabled) { el.mirrorBtn.hidden = true; return; }
+  el.mirrorBtn.hidden = false;
+  if (status.running) {
+    el.mirrorBtn.textContent = `Mirroring ${status.mirrored}/${status.total || '…'}`;
+    el.mirrorBtn.disabled = true;
+  } else if (status.total > 0 && status.mirrored >= status.total) {
+    el.mirrorBtn.textContent = 'Mirrored ✓';
+    el.mirrorBtn.disabled = false;
+    el.mirrorBtn.title = 'Sprites are mirrored locally — click to re-check for new ones';
+  } else {
+    el.mirrorBtn.textContent = status.mirrored > 0 ? `Mirror (${status.mirrored} done)` : 'Mirror';
+    el.mirrorBtn.disabled = false;
+  }
+}
+
+async function pollMirror() {
+  const status = await api('/api/sprites/status');
+  paintMirror(status);
+  if (status.enabled && status.running) {
+    setTimeout(() => { pollMirror().catch(() => {}); }, 1500);
+  } else if (status.enabled && status.total > 0 && status.mirrored >= status.total) {
+    // fully mirrored — reload so the grid picks up the local sprite URLs
+    await reload();
+    render();
+  }
+}
+
+async function mirrorSprites() {
+  try {
+    el.mirrorBtn.disabled = true;
+    const status = await api('/api/sprites/mirror', { method: 'POST' });
+    paintMirror(status);
+    toast('Mirroring sprites to the server — this runs in the background.');
+    pollMirror().catch(() => {});
+  } catch (err) {
+    toast(`Mirror failed: ${err.message}`, true);
+    el.mirrorBtn.disabled = false;
+  }
+}
+
 /* ---------- init ---------- */
 function init() {
   el.region = $('region'); el.caught = $('caught'); el.total = $('total'); el.pct = $('pct');
@@ -464,7 +506,7 @@ function init() {
   el.loading = $('loading'); el.skeleton = $('skeleton'); el.empty = $('empty');
   el.emptyTitle = $('empty-title'); el.emptyBody = $('empty-body'); el.emptyAction = $('empty-action');
   el.results = $('results'); el.resultLabel = $('result-label'); el.grid = $('grid');
-  el.importFile = $('import-file'); el.toast = $('toast');
+  el.importFile = $('import-file'); el.toast = $('toast'); el.mirrorBtn = $('mirror-btn');
 
   try {
     const savedTheme = localStorage.getItem(THEME_KEY);
@@ -493,6 +535,10 @@ function init() {
     if (file) onImport(file);
     el.importFile.value = '';
   });
+  el.mirrorBtn.addEventListener('click', mirrorSprites);
+
+  // reveal + label the mirror control based on server capability
+  pollMirror().catch(() => { el.mirrorBtn.hidden = true; });
 
   // initial loading view
   state.loading = true;

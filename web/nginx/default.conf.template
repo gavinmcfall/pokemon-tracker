@@ -1,8 +1,9 @@
 # Serves the static SPA and proxies /api to the api service, keeping the app
-# same-origin (no CORS). API_UPSTREAM is substituted by the stock nginx image
-# entrypoint (envsubst); default set in Dockerfile.web.
+# same-origin (no CORS). API_UPSTREAM is substituted by the nginx image
+# entrypoint (envsubst); default set in Dockerfile.web. Listens on 8080 so the
+# unprivileged (non-root) nginx image can bind it.
 server {
-    listen 80;
+    listen 8080;
     server_name _;
 
     root /usr/share/nginx/html;
