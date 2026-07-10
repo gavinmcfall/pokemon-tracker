@@ -1,7 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Hono } from 'hono';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createApp } from '../src/app.js';
 import { MemoryStore } from '../src/store/memory.js';
+import { SpriteMirror } from '../src/sprites.js';
 import { CONTRACT_ENTRIES } from './store-contract.js';
 
 let app: Hono;
@@ -165,5 +169,67 @@ describe('probes', () => {
   it('healthz and readyz respond ok', async () => {
     expect((await get('/healthz')).status).toBe(200);
     expect((await get('/readyz')).status).toBe(200);
+  });
+});
+
+describe('sprite mirror', () => {
+  it('reports disabled when no SpriteMirror is wired', async () => {
+    const body = await json(await get('/api/sprites/status'));
+    expect(body).toMatchObject({ enabled: false, running: false });
+    expect((await post('/api/sprites/mirror', {})).status).toBe(501);
+    expect((await get('/api/sprites/6.png')).status).toBe(404);
+  });
+
+  describe('when enabled', () => {
+    let dir: string;
+    let spriteApp: Hono;
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x42]);
+    const fakeFetch = (async () => new Response(pngBytes, { status: 200 })) as typeof fetch;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(path.join(tmpdir(), 'api-sprites-'));
+      const sprites = new SpriteMirror({ dir, fetchImpl: fakeFetch });
+      await sprites.init();
+      spriteApp = createApp(store, { sprites });
+    });
+    afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+    const sget = (p: string) => spriteApp.request(p);
+
+    it('mirrors on demand, rewrites entry URLs, and serves the files', async () => {
+      // before mirroring, entries keep remote URLs
+      const before = await json(await sget('/api/entries'));
+      expect(before[0].spriteUrl).toMatch(/^https:\/\//);
+
+      const kick = await spriteApp.request('/api/sprites/mirror', { method: 'POST' });
+      expect(kick.status).toBe(202);
+
+      // wait for the background run to finish
+      for (let i = 0; i < 50; i++) {
+        const st = await json(await sget('/api/sprites/status'));
+        if (!st.running && st.fetched + st.failed >= st.total && st.total > 0) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const status = await json(await sget('/api/sprites/status'));
+      expect(status.enabled).toBe(true);
+      expect(status.mirrored).toBeGreaterThan(0);
+      expect(status.failed).toBe(0);
+
+      // entries now point at the local mirror
+      const after = await json(await sget('/api/entries'));
+      const mirrored = after.find((e: { entryKey: string }) => e.entryKey === '0006-mega_x-male');
+      expect(mirrored.spriteUrl).toBe('/api/sprites/10034.png');
+
+      // and the file is served as a png
+      const img = await sget('/api/sprites/10034.png');
+      expect(img.status).toBe(200);
+      expect(img.headers.get('content-type')).toBe('image/png');
+      expect(new Uint8Array(await img.arrayBuffer())[0]).toBe(0x89);
+    });
+
+    it('rejects unsafe sprite keys with 404', async () => {
+      expect((await sget('/api/sprites/%2e%2e%2fsecret')).status).toBe(404);
+      expect((await sget('/api/sprites/missing.png')).status).toBe(404);
+    });
   });
 });

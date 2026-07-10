@@ -109,3 +109,14 @@ test('no horizontal overflow on a phone viewport', async ({ page }) => {
   );
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test('mirror-sprites control mirrors and rewrites tile sprite URLs to local', async ({ page }) => {
+  // The harness enables the sprite mirror (fake fetch), so the button shows.
+  const mirror = page.locator('#mirror-btn');
+  await expect(mirror).toBeVisible();
+  await mirror.click();
+  // completes quickly (fake fetch) — button settles to the mirrored state
+  await expect(mirror).toHaveText('Mirrored ✓', { timeout: 10_000 });
+  // the grid now points at the local mirror rather than a remote URL
+  await expect(page.locator('.grid button img').first()).toHaveAttribute('src', /^\/api\/sprites\//);
+});

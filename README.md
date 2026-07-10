@@ -46,6 +46,9 @@ POST /api/status            { entryKey, caught, gameOrigin?, method?, notes? } -
 POST /api/import            multipart field `file` (or raw text/csv body)
        -> { matched, updated, unmatched: [{line, reason, raw}] }
 GET  /api/export            -> text/csv (round-trips through import)
+GET  /api/sprites/status    -> { enabled, running, total, mirrored, fetched, failed, … }
+POST /api/sprites/mirror    -> 202; downloads all sprites to SPRITE_DIR in the background
+GET  /api/sprites/:key      -> image/png from the local mirror (404 if not mirrored)
 GET  /healthz  /readyz      -> k8s probes
 ```
 
@@ -74,13 +77,31 @@ mock data + localStorage:
   auto → light → dark (persisted). Reduced-motion, keyboard operation, 44px touch
   targets and focus rings are carried over from the design.
 - CSV **Import/Export** buttons wire the §6 sheet round-trip into the header.
+- **Mirror** button (shown only when `SPRITE_DIR` is set) — triggers the sprite
+  mirror and polls progress; once complete the grid switches to local sprites.
 
 Replacing it is a drop-in: overwrite `web/public/` and keep speaking the API above.
-Notes: sprites and the Google font load from the internet (matching the design; a
-system-ui fallback keeps it usable offline — mirror both if you want a fully
-offline LAN app). Catch metadata (`gameOrigin`/`method`/`notes`) is stored and
+Notes: the Google font loads from the internet (system-ui fallback keeps it usable
+offline); sprites are remote by default but can be mirrored locally for a fully
+offline LAN app (see **Sprite mirror** below). Catch metadata (`gameOrigin`/`method`/`notes`) is stored and
 CSV-importable but the design surfaces only the binary catch toggle; a metadata
 editor is a future addition.
+
+## Sprite mirror (offline sprites)
+
+Sprites default to canonical PokéAPI GitHub URLs. To make the app fully offline
+on the LAN, set **`SPRITE_DIR`** on the api to a writable (persistent) path and
+click **Mirror** in the UI (or `POST /api/sprites/mirror`). The api streams every
+referenced sprite into `SPRITE_DIR` (bounded concurrency, retry/backoff), then
+`GET /api/entries` rewrites each `spriteUrl` to `/api/sprites/<file>` for any
+sprite present on disk — served by the api (proxied through nginx like the rest
+of `/api`). Nothing is bundled in the image, so it stays small and the mirror is
+a one-click, on-demand step after deploy.
+
+Idempotent and resumable: re-running only fetches what's missing, and the DB is
+never mutated (canonical remote URLs stay in `entries.sprite_url`; rewriting is
+per-response), so a re-seed can't undo a mirror. When `SPRITE_DIR` is unset the
+feature is disabled end to end (the button hides; the routes report `enabled:false`).
 
 ## Seed
 

@@ -6,8 +6,9 @@
  */
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { createApp } from '../src/app.js';
+import { createApp, type AppOptions } from '../src/app.js';
 import { PgStore } from '../src/store/pg.js';
+import { SpriteMirror } from '../src/sprites.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -18,7 +19,15 @@ const port = Number.parseInt(process.env.PORT ?? '8321', 10);
 
 const store = new PgStore(databaseUrl);
 await store.migrate();
-const app = createApp(store);
+
+const appOptions: AppOptions = {};
+if (process.env.SPRITE_DIR) {
+  const sprites = new SpriteMirror({ dir: process.env.SPRITE_DIR });
+  await sprites.init();
+  appOptions.sprites = sprites;
+}
+
+const app = createApp(store, appOptions);
 app.use('*', serveStatic({ root: 'web/public' }));
 
 serve({ fetch: app.fetch, port }, (info) => {

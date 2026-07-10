@@ -34,7 +34,7 @@ services:
     environment:
       API_UPSTREAM: api:8080
     ports:
-      - "8090:80"
+      - "8090:8080"
     depends_on:
       - api
 
