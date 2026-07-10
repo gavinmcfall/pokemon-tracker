@@ -1,5 +1,4 @@
-import { createReadStream } from 'node:fs';
-import { mkdir, readdir, rename, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, stat } from 'node:fs/promises';
 import { createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -118,13 +117,19 @@ export class SpriteMirror {
     return full;
   }
 
-  async fileStream(key: string): Promise<{ stream: NodeJS.ReadableStream; size: number } | null> {
+  /**
+   * Read a mirrored sprite fully into memory. Sprites are tiny (~1 KB), so this
+   * buffers rather than streams — a Node fs stream handed to the HTTP layer
+   * throws ERR_INVALID_STATE when the client aborts mid-flight (common with
+   * hundreds of lazy-loaded <img>s) and crashes the process.
+   */
+  async readBytes(key: string): Promise<Buffer | null> {
     const full = this.filePath(key);
     if (!full) return null;
     try {
       const s = await stat(full);
       if (!s.isFile()) return null;
-      return { stream: createReadStream(full), size: s.size };
+      return await readFile(full);
     } catch {
       return null;
     }

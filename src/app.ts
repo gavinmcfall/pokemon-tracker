@@ -168,12 +168,14 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
 
   app.get('/api/sprites/:key', async (c) => {
     if (!sprites) return c.json({ error: 'not enabled' }, 404);
-    const file = await sprites.fileStream(c.req.param('key'));
-    if (!file) return c.json({ error: 'not mirrored' }, 404);
-    return c.body(file.stream as unknown as ReadableStream, 200, {
-      'content-type': 'image/png',
-      'cache-control': 'public, max-age=31536000, immutable',
-      'content-length': String(file.size),
+    const bytes = await sprites.readBytes(c.req.param('key'));
+    if (!bytes) return c.json({ error: 'not mirrored' }, 404);
+    return new Response(new Uint8Array(bytes), {
+      status: 200,
+      headers: {
+        'content-type': 'image/png',
+        'cache-control': 'public, max-age=31536000, immutable',
+      },
     });
   });
 
