@@ -1,0 +1,59 @@
+# Local stack mirroring the k8s deployment: web (nginx) → api (Hono) → postgres.
+#   docker compose up --build
+#   docker compose run --rm seed        # one-shot catalogue seed
+# Then open http://localhost:8090
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: livingdex
+      POSTGRES_USER: livingdex
+      POSTGRES_PASSWORD: livingdex
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U livingdex"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      DATABASE_URL: postgres://livingdex:livingdex@postgres:5432/livingdex
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      API_UPSTREAM: api:8080
+    ports:
+      - "8090:80"
+    depends_on:
+      - api
+
+  seed:
+    profiles: ["seed"]
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["node", "dist/seed/run.js"]
+    environment:
+      DATABASE_URL: postgres://livingdex:livingdex@postgres:5432/livingdex
+      SEED_TIER: full
+      SEED_CACHE_DIR: /cache
+    volumes:
+      - seedcache:/cache
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  seedcache:

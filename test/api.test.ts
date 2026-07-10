@@ -1,0 +1,169 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import type { Hono } from 'hono';
+import { createApp } from '../src/app.js';
+import { MemoryStore } from '../src/store/memory.js';
+import { CONTRACT_ENTRIES } from './store-contract.js';
+
+let app: Hono;
+let store: MemoryStore;
+
+beforeEach(async () => {
+  store = new MemoryStore();
+  await store.upsertEntries(CONTRACT_ENTRIES);
+  app = createApp(store);
+});
+
+const get = (path: string) => app.request(path);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const json = (res: Response): Promise<any> => res.json();
+const post = (path: string, body: unknown) =>
+  app.request(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+describe('GET /api/entries', () => {
+  it('returns the spec §3 entry shape', async () => {
+    const res = await get('/api/entries');
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body).toHaveLength(4);
+    expect(body[1]).toEqual({
+      entryKey: '0006-mega_x-male',
+      dex: 6,
+      name: 'Charizard',
+      formSlug: 'mega_x',
+      formLabel: 'Mega Charizard X',
+      gender: 'male',
+      types: ['fire', 'dragon'],
+      generation: 1,
+      spriteUrl: 'https://sprites.example/10034.png',
+      isCosmetic: false,
+      status: null,
+    });
+  });
+
+  it('applies filters server-side', async () => {
+    await store.setStatus({ entryKey: '0666-fancy-female', caught: true });
+    const caught = await json(await get('/api/entries?status=caught'));
+    expect(caught.map((e: { entryKey: string }) => e.entryKey)).toEqual(['0666-fancy-female']);
+    const genType = await json(await get('/api/entries?gen=1&type=dragon'));
+    expect(genType.map((e: { entryKey: string }) => e.entryKey)).toEqual(['0006-mega_x-male']);
+    const q = await json(await get('/api/entries?q=mewtwo'));
+    expect(q.map((e: { entryKey: string }) => e.entryKey)).toEqual(['0150-default-genderless']);
+  });
+
+  it('rejects malformed filters', async () => {
+    expect((await get('/api/entries?gen=zero')).status).toBe(400);
+    expect((await get('/api/entries?status=sometimes')).status).toBe(400);
+    expect((await get('/api/entries?type=fire;drop table')).status).toBe(400);
+  });
+});
+
+describe('GET /api/summary', () => {
+  it('returns caught/total/pct/byType', async () => {
+    await store.setStatus({ entryKey: '0006-mega_x-male', caught: true });
+    const body = await json(await get('/api/summary'));
+    expect(body).toMatchObject({ caught: 1, total: 4, pct: 25 });
+    expect(body.byType.find((t: { type: string }) => t.type === 'dragon')).toEqual({ type: 'dragon', caught: 1, total: 1 });
+  });
+  it('scopes to a generation', async () => {
+    const body = await json(await get('/api/summary?gen=6'));
+    expect(body).toMatchObject({ caught: 0, total: 1 });
+  });
+});
+
+describe('POST /api/status', () => {
+  it('sets and returns the status', async () => {
+    const res = await post('/api/status', {
+      entryKey: '0006-default-male', caught: true, gameOrigin: 'emu:HeartGold', method: 'caught',
+    });
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body).toMatchObject({
+      entryKey: '0006-default-male', caught: true, gameOrigin: 'emu:HeartGold', method: 'caught', notes: null,
+    });
+    expect(body.caughtAt).toBeTruthy();
+  });
+
+  it('404s on unknown entryKey', async () => {
+    const res = await post('/api/status', { entryKey: '9999-nope-male', caught: true });
+    expect(res.status).toBe(404);
+  });
+
+  it('validates the body', async () => {
+    expect((await post('/api/status', { caught: true })).status).toBe(400);
+    expect((await post('/api/status', { entryKey: '0006-default-male', caught: 'yes' })).status).toBe(400);
+    expect((await post('/api/status', { entryKey: '0006-default-male', caught: true, notes: 42 })).status).toBe(400);
+    const raw = await app.request('/api/status', { method: 'POST', body: 'not json' });
+    expect(raw.status).toBe(400);
+  });
+});
+
+describe('POST /api/import and GET /api/export', () => {
+  it('imports a multipart CSV and reports matched/updated/unmatched', async () => {
+    const csv = 'entryKey,caught\n0006-mega_x-male,true\n9999-nope-male,true\n';
+    const form = new FormData();
+    form.append('file', new File([csv], 'sheet.csv', { type: 'text/csv' }));
+    const res = await app.request('/api/import', { method: 'POST', body: form });
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.matched).toBe(1);
+    expect(body.updated).toBe(1);
+    expect(body.unmatched).toHaveLength(1);
+    expect(body.unmatched[0]).toMatchObject({ line: 3 });
+
+    const entries = await json(await get('/api/entries?status=caught'));
+    expect(entries.map((e: { entryKey: string }) => e.entryKey)).toEqual(['0006-mega_x-male']);
+  });
+
+  it('accepts a raw text/csv body too', async () => {
+    const res = await app.request('/api/import', {
+      method: 'POST',
+      headers: { 'content-type': 'text/csv' },
+      body: 'dex,caught\n150,yes\n',
+    });
+    const body = await json(res);
+    expect(body).toMatchObject({ matched: 1, updated: 1, unmatched: [] });
+  });
+
+  it('rejects an empty import', async () => {
+    const res = await app.request('/api/import', {
+      method: 'POST',
+      headers: { 'content-type': 'text/csv' },
+      body: '',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('export → import round-trips the collection', async () => {
+    await store.setStatus({ entryKey: '0666-fancy-female', caught: true, gameOrigin: 'emu:Violet' });
+    const exportRes = await get('/api/export');
+    expect(exportRes.status).toBe(200);
+    expect(exportRes.headers.get('content-type')).toContain('text/csv');
+    const csv = await exportRes.text();
+
+    // wipe and restore into a fresh store via import
+    const fresh = new MemoryStore();
+    await fresh.upsertEntries(CONTRACT_ENTRIES);
+    const freshApp = createApp(fresh);
+    const res = await freshApp.request('/api/import', {
+      method: 'POST',
+      headers: { 'content-type': 'text/csv' },
+      body: csv,
+    });
+    const body = await json(res);
+    expect(body.unmatched).toEqual([]);
+    const restored = await fresh.listEntries({ status: 'caught' });
+    expect(restored.map((e) => e.entryKey)).toEqual(['0666-fancy-female']);
+    expect(restored[0]!.status).toMatchObject({ gameOrigin: 'emu:Violet' });
+  });
+});
+
+describe('probes', () => {
+  it('healthz and readyz respond ok', async () => {
+    expect((await get('/healthz')).status).toBe(200);
+    expect((await get('/readyz')).status).toBe(200);
+  });
+});

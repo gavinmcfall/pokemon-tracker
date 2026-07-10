@@ -1,0 +1,136 @@
+---
+# bjw-s app-template release: api (Hono), web (nginx static), seed (weekly CronJob).
+# Values follow app-template v3 conventions — align chartRef/version with the
+# shared OCIRepository in your home-ops repo.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: livingdex
+  namespace: livingdex
+spec:
+  interval: 30m
+  chartRef: # ADJUST: your shared app-template OCIRepository
+    kind: OCIRepository
+    name: app-template
+    namespace: flux-system
+  values:
+    controllers:
+      api:
+        strategy: RollingUpdate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/gavinmcfall/livingdex-api
+              tag: latest # ADJUST: pin to CI sha tag; automate with Flux image automation if used
+            env:
+              PORT: "8080"
+              DATABASE_URL:
+                valueFrom:
+                  secretKeyRef:
+                    name: livingdex-pg-app
+                    key: uri
+            probes:
+              liveness:
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 8080
+              readiness:
+                custom: true
+                spec:
+                  httpGet:
+                    path: /readyz
+                    port: 8080
+            resources:
+              requests:
+                cpu: 10m
+                memory: 64Mi
+              limits:
+                memory: 256Mi
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 1000
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+
+      web:
+        strategy: RollingUpdate
+        containers:
+          app:
+            image:
+              repository: ghcr.io/gavinmcfall/livingdex-web
+              tag: latest # ADJUST: pin to CI sha tag
+            env:
+              API_UPSTREAM: livingdex-api:8080
+            probes:
+              liveness:
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 80
+              readiness:
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: 80
+            resources:
+              requests:
+                cpu: 5m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
+
+      seed:
+        type: cronjob
+        cronjob:
+          schedule: "0 3 * * 1" # weekly, Monday 03:00 — picks up new species/forms/games
+          concurrencyPolicy: Forbid
+          successfulJobsHistory: 1
+          failedJobsHistory: 1
+        containers:
+          app:
+            image:
+              repository: ghcr.io/gavinmcfall/livingdex-api
+              tag: latest # ADJUST: keep in lockstep with the api tag
+            command: ["node", "dist/seed/run.js"]
+            env:
+              DATABASE_URL:
+                valueFrom:
+                  secretKeyRef:
+                    name: livingdex-pg-app
+                    key: uri
+              SEED_TIER: full
+              SEED_CACHE_DIR: /cache
+              SEED_CONCURRENCY: "8"
+            resources:
+              requests:
+                cpu: 25m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+
+    service:
+      api:
+        controller: api
+        ports:
+          http:
+            port: 8080
+      web:
+        controller: web
+        ports:
+          http:
+            port: 80
+
+    persistence:
+      seed-cache:
+        type: persistentVolumeClaim
+        accessMode: ReadWriteOnce
+        size: 1Gi
+        storageClass: ceph-block # ADJUST: your Rook-Ceph block storage class
+        advancedMounts:
+          seed:
+            app:
+              - path: /cache
