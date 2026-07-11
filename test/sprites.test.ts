@@ -87,19 +87,20 @@ describe('SpriteMirror', () => {
     expect(m.has('bad.png')).toBe(false);
   });
 
-  it('serves mirrored files and refuses unsafe keys', async () => {
+  it('reads mirrored files as bytes and refuses unsafe keys', async () => {
     const dir = await tempDir();
     const m = new SpriteMirror({ dir, fetchImpl: fakeFetch(() => png(5)).fetch });
     await m.init();
     await m.run(['https://x/42.png']);
 
-    const hit = await m.fileStream('42.png');
+    const hit = await m.readBytes('42.png');
     expect(hit).not.toBeNull();
-    expect(hit!.size).toBe(5);
+    expect(hit!.length).toBe(5);
+    expect(hit![0]).toBe(0x89);
     const bytes = await readFile(path.join(dir, '42.png'));
     expect(bytes[0]).toBe(0x89);
 
-    expect(await m.fileStream('missing.png')).toBeNull();
+    expect(await m.readBytes('missing.png')).toBeNull();
     expect(m.filePath('../../etc/passwd')).toBeNull();
     expect(m.filePath('a/b.png')).toBeNull();
   });
