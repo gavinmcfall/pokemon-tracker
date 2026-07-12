@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 // The e2e harness (e2e/server.ts) seeds four entries: three in Gen I
 // (Charizard default+mega_x, Mewtwo) and one caught Gen VI Vivillon.
-const gridButton = '.grid button';
+const gridButton = '.grid .tile-body';
 
 test.beforeEach(async ({ page, request }) => {
   await request.post('/e2e/reset');
@@ -118,5 +118,48 @@ test('mirror-sprites control mirrors and rewrites tile sprite URLs to local', as
   // completes quickly (fake fetch) — button settles to the mirrored state
   await expect(mirror).toHaveText('Mirrored ✓', { timeout: 10_000 });
   // the grid now points at the local mirror rather than a remote URL
-  await expect(page.locator('.grid button img').first()).toHaveAttribute('src', /^\/api\/sprites\//);
+  await expect(page.locator('.grid .tile-body img').first()).toHaveAttribute('src', /^\/api\/sprites\//);
+});
+
+test('detail sheet: opens via ⋯, edits metadata, persists across reload', async ({ page }) => {
+  const mega = `${gridButton}[data-entry-key="0006-mega_x-male"]`;
+  await page.locator(`${mega} ~ .tile-info`).click();
+  const panel = page.locator('.sheet-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel).toContainText('MY CATCH');
+  await expect(panel).toContainText('Mega Charizard X');
+  // no enrichment in the harness → no obtainability section, and filters hidden
+  await expect(page.locator('.sheet-section.obtain')).toHaveCount(0);
+  await expect(page.locator('#obtain-row')).toBeHidden();
+
+  await panel.getByLabel('Close details').click(); // reopen fresh below; first fill fields
+  await page.locator(`${mega} ~ .tile-info`).click();
+  await page.locator('.sheet-panel input[list="dex-game-suggestions"]').fill('emu:Emerald');
+  await page.locator('.sheet-panel input[list="dex-method-suggestions"]').fill('bred');
+  await page.locator('.sheet-panel textarea').fill('shiny after 300 eggs');
+  await page.locator('.sheet-panel textarea').blur();
+  // mark caught from inside the sheet
+  await page.locator('.sheet-section button[aria-pressed]').first().click();
+  await expect(page.locator('#caught')).toHaveText('1');
+
+  await page.reload();
+  await expect(page.locator(gridButton).first()).toBeVisible();
+  await page.locator(`${mega} ~ .tile-info`).click();
+  const panel2 = page.locator('.sheet-panel');
+  await expect(panel2.locator('input[list="dex-game-suggestions"]')).toHaveValue('emu:Emerald');
+  await expect(panel2.locator('input[list="dex-method-suggestions"]')).toHaveValue('bred');
+  await expect(panel2.locator('textarea')).toHaveValue('shiny after 300 eggs');
+  await expect(panel2.locator('button[aria-pressed="true"]').first()).toBeVisible();
+});
+
+test('detail sheet: Escape and scrim click close it', async ({ page }) => {
+  await page.locator('.grid .tile-info').first().click();
+  await expect(page.locator('.sheet-panel')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.sheet-panel')).toHaveCount(0);
+
+  await page.locator('.grid .tile-info').first().click();
+  await expect(page.locator('.sheet-panel')).toBeVisible();
+  await page.locator('.sheet-scrim').click({ position: { x: 5, y: 5 } });
+  await expect(page.locator('.sheet-panel')).toHaveCount(0);
 });

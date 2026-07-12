@@ -13,11 +13,13 @@
 </head>
 <body>
   <!--
-    Production front-end — an implementation of the Claude Design deliverable
-    "Living Dex Tracker.dc.html" (project 2258ee1c). The DC-framework prototype
-    is reproduced here as a dependency-free SPA wired to the app's own /api:
-    catch state is server-backed (POST /api/status), entries come from
-    GET /api/entries. Structure is built by app.js.
+    Production front-end — implements the Claude Design deliverable
+    "Living Dex Tracker v2.dc.html" (project 2258ee1c): the v1 grid plus a
+    per-entry detail sheet (My Catch editor + Obtainability zone) and
+    obtainability filters. Wired to the app's own /api; catch + metadata are
+    server-backed (POST /api/status). The obtainability layer stays hidden until
+    the API returns enrichment fields (availability[], gmaxCapable, …).
+    Structure is built by app.js.
   -->
   <div id="app">
     <header class="topbar">
@@ -51,6 +53,14 @@
       </div>
 
       <div class="type-row" id="type-chips" role="group" aria-label="Type filter"></div>
+
+      <div class="obtain-row" id="obtain-row" role="group" aria-label="Obtainability filters" hidden>
+        <span class="obtain-label">OBTAINABLE:</span>
+        <div class="obtain-chips" id="obtain-chips"></div>
+        <select class="game-select" id="game-select" aria-label="Obtainable in game">
+          <option value="">in any game…</option>
+        </select>
+      </div>
     </header>
 
     <main class="main">

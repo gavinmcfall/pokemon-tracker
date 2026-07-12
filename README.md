@@ -79,6 +79,12 @@ mock data + localStorage:
 - CSV **Import/Export** buttons wire the §6 sheet round-trip into the header.
 - **Mirror** button (shown only when `SPRITE_DIR` is set) — triggers the sprite
   mirror and polls progress; once complete the grid switches to local sprites.
+- **Per-entry detail sheet** (v2) — a `⋯` on each tile (or long-press) opens a
+  sheet with a **My Catch** editor (caught toggle + Game / Method / Notes,
+  combo-suggested, saving to `POST /api/status`) and an **Obtainability** zone.
+- **Obtainability** filters + zone are driven by *planned* enrichment fields
+  (`availability[]`, `gmaxCapable`, `shinyLockedIn`, …). The API doesn't return
+  them yet, so both stay hidden until it does — the catch editor works today.
 
 Replacing it is a drop-in: overwrite `web/public/` and keep speaking the API above.
 Notes: the Google font loads from the internet (system-ui fallback keeps it usable
