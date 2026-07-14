@@ -1,5 +1,5 @@
-import type { Entry, EntryFilters, EntryWithStatus, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
-import { applyStatusPatch, compareEntries, normalizeSpecimen, type SpecimenSyncResult, type Store, type UpsertResult } from './store.js';
+import type { Entry, EntryFilters, EntryWithStatus, Obtainability, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import { applyStatusPatch, compareEntries, normalizeSpecimen, type ObtainabilityRecord, type SpecimenSyncResult, type Store, type UpsertResult } from './store.js';
 
 /**
  * In-memory Store used by contract tests and the e2e harness. Must behave
@@ -9,6 +9,7 @@ export class MemoryStore implements Store {
   private entries = new Map<string, Entry>();
   private statuses = new Map<string, Status>();
   private specimens = new Map<string, Specimen>();
+  private obtainabilities = new Map<string, Obtainability>();
   now: () => Date = () => new Date();
 
   async upsertEntries(entries: Entry[]): Promise<UpsertResult> {
@@ -52,6 +53,7 @@ export class MemoryStore implements Store {
         types: [...e.types],
         status: this.statuses.get(e.entryKey) ?? null,
         specimen: this.specimens.get(e.entryKey) ?? null,
+        obtainability: this.obtainabilities.get(e.entryKey) ?? null,
       }));
   }
 
@@ -102,11 +104,26 @@ export class MemoryStore implements Store {
     return { upserted: next.size, unmatched };
   }
 
-  /** Test helper: wipe all entries, statuses and specimens. */
+  async replaceObtainability(records: ObtainabilityRecord[]): Promise<SpecimenSyncResult> {
+    const unmatched: string[] = [];
+    const next = new Map<string, Obtainability>();
+    for (const r of records) {
+      if (!this.entries.has(r.entryKey)) {
+        unmatched.push(r.entryKey);
+        continue;
+      }
+      next.set(r.entryKey, r.obtainability);
+    }
+    this.obtainabilities = next;
+    return { upserted: next.size, unmatched };
+  }
+
+  /** Test helper: wipe all entries, statuses, specimens and obtainability. */
   async reset(): Promise<void> {
     this.entries.clear();
     this.statuses.clear();
     this.specimens.clear();
+    this.obtainabilities.clear();
   }
 
   async ready(): Promise<void> {}

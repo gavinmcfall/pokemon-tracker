@@ -96,13 +96,13 @@ describe('exportCsv → planImport round trip', () => {
           entryKey: '0006-mega_x-male', caught: true, caughtAt: '2026-07-10T09:12:00.000Z',
           gameOrigin: 'emu:HeartGold', method: 'bred', notes: 'notes, with "commas"',
         },
-        specimen: null,
+        specimen: null, obtainability: null,
       },
       {
         entryKey: '0150-default-genderless', dex: 150, name: 'Mewtwo', formSlug: 'default',
         formLabel: null, gender: 'genderless', types: ['psychic'],
         generation: 1, spriteUrl: 'https://example/150.png', isCosmetic: false, status: null,
-        specimen: null,
+        specimen: null, obtainability: null,
       },
     ];
     const csv = exportCsv(entries);

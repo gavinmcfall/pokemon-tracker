@@ -1,4 +1,4 @@
-import type { Entry, EntryFilters, EntryWithStatus, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import type { Entry, EntryFilters, EntryWithStatus, Obtainability, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
 
 export interface UpsertResult {
   inserted: number;
@@ -7,10 +7,15 @@ export interface UpsertResult {
 }
 
 export interface SpecimenSyncResult {
-  /** How many specimens were written (matched a live entry). */
+  /** How many rows were written (matched a live entry). */
   upserted: number;
   /** entryKeys in the payload with no matching catalogue entry (reported, not fatal). */
   unmatched: string[];
+}
+
+export interface ObtainabilityRecord {
+  entryKey: string;
+  obtainability: Obtainability;
 }
 
 /** Normalize a lenient ingest payload into a full Specimen (defaults + null-fill). */
@@ -52,6 +57,11 @@ export interface Store {
    * entryKey matches a live entry. Unmatched keys are reported, never fatal.
    */
   replaceSpecimens(inputs: SpecimenInput[]): Promise<SpecimenSyncResult>;
+  /**
+   * Full-sync the catalogue-derived obtainability set (regenerated each seed):
+   * replaces all rows, keeping only entryKeys that match a live entry.
+   */
+  replaceObtainability(records: ObtainabilityRecord[]): Promise<SpecimenSyncResult>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }

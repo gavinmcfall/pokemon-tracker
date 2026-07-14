@@ -756,6 +756,10 @@ function setGen(n) {
 }
 
 function ingest(entries) {
+  // The API nests the derived obtainability fields under `entry.obtainability`;
+  // flatten them onto the entry so the obtainability zone/filters (which read
+  // e.availability, e.gmaxCapable, …) light up when the API provides them.
+  for (const e of entries) if (e.obtainability) Object.assign(e, e.obtainability);
   state.entries = entries;
   state.gensAvailable = new Set(entries.map((e) => e.generation));
   if (!state.gensAvailable.has(state.gen)) state.gen = Math.min(...state.gensAvailable) || 1;

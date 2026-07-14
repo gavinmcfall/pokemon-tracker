@@ -21,6 +21,24 @@ export interface RawSpecies {
   generation: NamedRef;
   names: RawLocalizedName[];
   varieties: { is_default: boolean; pokemon: NamedRef }[];
+  has_gender_differences?: boolean;
+  evolution_chain?: { url: string } | null;
+}
+
+/** /pokemon/{name}/encounters — location areas with the versions each appears in. */
+export interface RawEncounter {
+  version_details: { version: NamedRef }[];
+}
+
+/** A node in an /evolution-chain tree. */
+export interface RawChainLink {
+  species: NamedRef;
+  evolves_to: RawChainLink[];
+}
+
+export interface RawEvolutionChain {
+  id: number;
+  chain: RawChainLink;
 }
 
 export interface RawPokemon {
@@ -105,6 +123,14 @@ export class PokeApiClient {
 
   async form(name: string): Promise<RawForm> {
     return this.get<RawForm>(`pokemon-form/${name}`);
+  }
+
+  async encounters(pokemonName: string): Promise<RawEncounter[]> {
+    return this.get<RawEncounter[]>(`pokemon/${pokemonName}/encounters`);
+  }
+
+  async evolutionChain(idOrUrl: number | string): Promise<RawEvolutionChain> {
+    return this.get<RawEvolutionChain>(typeof idOrUrl === 'number' ? `evolution-chain/${idOrUrl}` : idOrUrl);
   }
 
   private async fetchWithRetry(url: string): Promise<string> {
