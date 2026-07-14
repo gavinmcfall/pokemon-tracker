@@ -159,6 +159,31 @@ describe('expandSpecies on real PokéAPI fixtures (spec §8 edge cases)', () => 
     expect(slugs.has('mimikyu_busted')).toBe(false);
   });
 
+  it('Pichu: empty-form_name base becomes a real default slot, not a "pichu" cosmetic form', () => {
+    expect(keys('pichu')).toEqual([
+      '0172-default-female', '0172-default-male',
+      '0172-spiky_eared-female', '0172-spiky_eared-male',
+    ]);
+    const entries = expandSpecies(bundleFor('pichu', 'full'), 'full');
+    const def = entries.filter((e) => e.formSlug === 'default');
+    expect(def).toHaveLength(2);
+    expect(def.every((e) => e.formLabel === null && !e.isCosmetic)).toBe(true);
+    const spiky = entries.find((e) => e.formSlug === 'spiky_eared')!;
+    expect(spiky.formLabel).toBe('Spiky-eared Pichu');
+  });
+
+  it('Genesect: empty-form_name base becomes default; drive forms keep their own slugs', () => {
+    expect(keys('genesect')).toEqual([
+      '0649-burn-genderless', '0649-chill-genderless',
+      '0649-default-genderless', '0649-douse-genderless', '0649-shock-genderless',
+    ]);
+    const def = expandSpecies(bundleFor('genesect', 'full'), 'full')
+      .find((e) => e.formSlug === 'default')!;
+    expect(def.formLabel).toBeNull();
+    expect(def.isCosmetic).toBe(false);
+    expect(def.types).toEqual(['bug', 'steel']);
+  });
+
   it('Arceus: plates change type, so they are not cosmetic', () => {
     const entries = expandSpecies(bundleFor('arceus', 'full'), 'full');
     const fire = entries.find((e) => e.formSlug === 'fire')!;
@@ -196,7 +221,7 @@ describe('expandSpecies on real PokéAPI fixtures (spec §8 edge cases)', () => 
 
   it('entry keys are unique within every fixture species at every tier', () => {
     for (const tier of ['species', 'forms', 'full'] as const) {
-      for (const sp of ['charizard', 'unown', 'vivillon', 'alcremie', 'meowstic', 'minior', 'pikachu', 'arceus']) {
+      for (const sp of ['charizard', 'unown', 'vivillon', 'alcremie', 'meowstic', 'minior', 'pikachu', 'arceus', 'pichu', 'genesect']) {
         const list = expandSpecies(bundleFor(sp, tier), tier).map((e) => e.entryKey);
         expect(new Set(list).size).toBe(list.length);
       }
