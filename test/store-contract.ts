@@ -129,5 +129,43 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       expect(list).toHaveLength(1);
       expect(list[0]!.status).toMatchObject({ caught: true, notes: 'keeper' });
     });
+
+    it('replaceSpecimens embeds specimens, normalizes defaults, reports unmatched', async () => {
+      const store = await makeStore();
+      await store.upsertEntries(CONTRACT_ENTRIES);
+      const res = await store.replaceSpecimens([
+        {
+          entryKey: '0006-mega_x-male', shiny: true, event: false, level: 100, originGame: 'swsh',
+          metYear: 2020, ivPerfect: 6, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+          tera: null, ball: 'Cherish Ball', nature: 'Modest', ability: 'Blaze', ribbons: ['Wishing'],
+          nickname: 'Zard', ot: 'Ash',
+        },
+        { entryKey: '0150-default-genderless' }, // sparse → defaults
+        { entryKey: '9999-nope-male', shiny: true }, // not in catalogue
+      ]);
+      expect(res.upserted).toBe(2);
+      expect(res.unmatched).toEqual(['9999-nope-male']);
+
+      const list = await store.listEntries({});
+      const mega = list.find((e) => e.entryKey === '0006-mega_x-male')!;
+      expect(mega.specimen).toMatchObject({
+        shiny: true, event: false, ivPerfect: 6, originGame: 'swsh',
+        ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, ribbons: ['Wishing'], ot: 'Ash',
+      });
+      const mewtwo = list.find((e) => e.entryKey === '0150-default-genderless')!;
+      expect(mewtwo.specimen).toMatchObject({ shiny: false, event: false, ribbons: [], ivs: null, tera: null });
+      // entries without a specimen embed null
+      expect(list.find((e) => e.entryKey === '0006-default-male')!.specimen).toBeNull();
+    });
+
+    it('replaceSpecimens is a full-sync: a new payload drops the previous set', async () => {
+      const store = await makeStore();
+      await store.upsertEntries(CONTRACT_ENTRIES);
+      await store.replaceSpecimens([{ entryKey: '0006-mega_x-male', shiny: true }]);
+      await store.replaceSpecimens([{ entryKey: '0666-fancy-female', event: true }]);
+      const list = await store.listEntries({});
+      expect(list.find((e) => e.entryKey === '0006-mega_x-male')!.specimen).toBeNull();
+      expect(list.find((e) => e.entryKey === '0666-fancy-female')!.specimen).toMatchObject({ event: true });
+    });
   });
 }

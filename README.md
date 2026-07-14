@@ -32,6 +32,16 @@ One **entry** = one collectible slot, keyed `entryKey = {dex4}-{formSlug}-{gende
 row per entry: `caught`, `caughtAt`, `gameOrigin` (e.g. `emu:HeartGold`),
 `method`, `notes`.
 
+A third, optional **`specimen`** row per entry holds HOME-derived facts about the
+best individual filling a caught slot — `shiny`, `event`, `level`, `originGame`,
+`metYear`, `ivPerfect`, `ivs`, `tera`, `ball`, `nature`, `ability`, `ribbons[]`,
+`nickname`, `ot`. It's machine-generated from a Pokémon HOME export (regenerated
+each sync via `POST /api/specimens`, a full replace) and kept distinct from
+`status` so the two never clobber each other. `GET /api/entries` embeds both
+`status` and `specimen` (each null when absent). The front-end surfaces it as
+shiny/event/6IV badges on caught tiles and a **Best Specimen** zone in the detail
+sheet (origin, IVs, Tera, ribbons, ball/nature, nickname/OT).
+
 ### API
 
 All JSON unless noted. `web` proxies `/api` to the api service (one origin, no CORS).
@@ -43,9 +53,13 @@ GET  /api/summary?gen=      -> { caught, total, pct, byType: [{type, caught, tot
 POST /api/status            { entryKey, caught, gameOrigin?, method?, notes? } -> Status
        (metadata fields are patch-style: omitted = keep, null/"" = clear;
         caughtAt is server-managed — set on catch, kept on re-affirm, cleared on uncatch)
-POST /api/import            multipart field `file` (or raw text/csv body)
+POST /api/import[?dryRun=1] multipart field `file` (or raw text/csv body)
        -> { matched, updated, unmatched: [{line, reason, raw}] }
+       (dryRun=1: resolve + report only, no writes; adds
+        { changed, changes:[{entryKey, caught:{from,to}, metaChanged}] })
 GET  /api/export            -> text/csv (round-trips through import)
+POST /api/specimens         JSON array (or { specimens:[...] }) of HOME-derived
+       records -> { synced, unmatched }  (full-sync: replaces the whole set)
 GET  /api/sprites/status    -> { enabled, running, total, mirrored, fetched, failed, … }
 POST /api/sprites/mirror    -> 202; downloads all sprites to SPRITE_DIR in the background
 GET  /api/sprites/:key      -> image/png from the local mirror (404 if not mirrored)

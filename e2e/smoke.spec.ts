@@ -152,6 +152,37 @@ test('detail sheet: opens via ⋯, edits metadata, persists across reload', asyn
   await expect(panel2.locator('button[aria-pressed="true"]').first()).toBeVisible();
 });
 
+test('specimen: caught Vivillon shows shiny/event/6IV badges and a Best Specimen zone', async ({ page }) => {
+  await page.locator('.gen-chips button[data-gen="6"]').click();
+  const vivillon = `${gridButton}[data-entry-key="0666-fancy-female"]`;
+  await expect(page.locator(vivillon)).toBeVisible();
+  // at-a-glance badges on the tile
+  await expect(page.locator(`${vivillon} .tile-badge[data-kind="shiny"]`)).toBeVisible();
+  await expect(page.locator(`${vivillon} .tile-badge[data-kind="event"]`)).toBeVisible();
+  await expect(page.locator(`${vivillon} .tile-badge[data-kind="sixiv"]`)).toBeVisible();
+
+  // open the sheet → Best Specimen zone with the rich detail
+  await page.locator(`${vivillon} ~ .tile-info`).click();
+  const zone = page.locator('.sheet-section.specimen');
+  await expect(zone).toBeVisible();
+  await expect(zone).toContainText('BEST SPECIMEN');
+  await expect(zone).toContainText('✨ SHINY');
+  await expect(zone).toContainText('TERA FAIRY');
+  await expect(zone).toContainText('Scarlet/Violet'); // originGame slug -> friendly label
+  await expect(zone).toContainText('2023');
+  await expect(zone).toContainText('Papillon'); // nickname
+  await expect(zone).toContainText('Serina'); // OT
+  await expect(zone).toContainText('🎀 Classic'); // ribbon
+});
+
+test('specimen: an uncaught entry has no badges and no Best Specimen zone', async ({ page }) => {
+  const charizard = `${gridButton}[data-entry-key="0006-default-male"]`;
+  await expect(page.locator(`${charizard} .tile-badge`)).toHaveCount(0);
+  await page.locator(`${charizard} ~ .tile-info`).click();
+  await expect(page.locator('.sheet-panel')).toBeVisible();
+  await expect(page.locator('.sheet-section.specimen')).toHaveCount(0);
+});
+
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {
   await page.locator('.grid .tile-info').first().click();
   await expect(page.locator('.sheet-panel')).toBeVisible();

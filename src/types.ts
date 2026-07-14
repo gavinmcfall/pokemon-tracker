@@ -26,8 +26,60 @@ export interface Status {
   notes: string | null;
 }
 
-/** Entry as served by GET /api/entries: spec §3 shape plus embedded status. */
-export type EntryWithStatus = Entry & { status: Status | null };
+/** IV spread (0..31 each). */
+export interface Ivs {
+  hp: number;
+  atk: number;
+  def: number;
+  spa: number;
+  spd: number;
+  spe: number;
+}
+
+/**
+ * HOME-derived facts about the best individual filling a caught slot, keyed by
+ * entryKey. Generated from a Pokémon HOME export, regenerated on each sync —
+ * distinct from owner-authored `Status`.
+ */
+export interface Specimen {
+  entryKey: string;
+  shiny: boolean;
+  event: boolean;
+  level: number | null;
+  originGame: string | null;
+  metYear: number | null;
+  ivPerfect: number | null;
+  ivs: Ivs | null;
+  tera: string | null;
+  ball: string | null;
+  nature: string | null;
+  ability: string | null;
+  ribbons: string[];
+  nickname: string | null;
+  ot: string | null;
+}
+
+/** Ingest shape for POST /api/specimens — only entryKey is required. */
+export interface SpecimenInput {
+  entryKey: string;
+  shiny?: boolean;
+  event?: boolean;
+  level?: number | null;
+  originGame?: string | null;
+  metYear?: number | null;
+  ivPerfect?: number | null;
+  ivs?: Ivs | null;
+  tera?: string | null;
+  ball?: string | null;
+  nature?: string | null;
+  ability?: string | null;
+  ribbons?: string[] | null;
+  nickname?: string | null;
+  ot?: string | null;
+}
+
+/** Entry as served by GET /api/entries: spec §3 shape plus embedded status + specimen. */
+export type EntryWithStatus = Entry & { status: Status | null; specimen: Specimen | null };
 
 export interface StatusPatch {
   entryKey: string;

@@ -1,5 +1,5 @@
-import type { Entry, EntryFilters, EntryWithStatus, Status, StatusPatch, Summary } from '../types.js';
-import { applyStatusPatch, compareEntries, type Store, type UpsertResult } from './store.js';
+import type { Entry, EntryFilters, EntryWithStatus, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import { applyStatusPatch, compareEntries, normalizeSpecimen, type SpecimenSyncResult, type Store, type UpsertResult } from './store.js';
 
 /**
  * In-memory Store used by contract tests and the e2e harness. Must behave
@@ -8,6 +8,7 @@ import { applyStatusPatch, compareEntries, type Store, type UpsertResult } from 
 export class MemoryStore implements Store {
   private entries = new Map<string, Entry>();
   private statuses = new Map<string, Status>();
+  private specimens = new Map<string, Specimen>();
   now: () => Date = () => new Date();
 
   async upsertEntries(entries: Entry[]): Promise<UpsertResult> {
@@ -46,7 +47,12 @@ export class MemoryStore implements Store {
         return true;
       })
       .sort(compareEntries)
-      .map((e) => ({ ...e, types: [...e.types], status: this.statuses.get(e.entryKey) ?? null }));
+      .map((e) => ({
+        ...e,
+        types: [...e.types],
+        status: this.statuses.get(e.entryKey) ?? null,
+        specimen: this.specimens.get(e.entryKey) ?? null,
+      }));
   }
 
   async listEntryKeys(): Promise<Set<string>> {
@@ -82,10 +88,25 @@ export class MemoryStore implements Store {
     return { ...next };
   }
 
-  /** Test helper: wipe all entries and statuses. */
+  async replaceSpecimens(inputs: SpecimenInput[]): Promise<SpecimenSyncResult> {
+    const unmatched: string[] = [];
+    const next = new Map<string, Specimen>();
+    for (const input of inputs) {
+      if (!this.entries.has(input.entryKey)) {
+        unmatched.push(input.entryKey);
+        continue;
+      }
+      next.set(input.entryKey, normalizeSpecimen(input));
+    }
+    this.specimens = next;
+    return { upserted: next.size, unmatched };
+  }
+
+  /** Test helper: wipe all entries, statuses and specimens. */
   async reset(): Promise<void> {
     this.entries.clear();
     this.statuses.clear();
+    this.specimens.clear();
   }
 
   async ready(): Promise<void> {}

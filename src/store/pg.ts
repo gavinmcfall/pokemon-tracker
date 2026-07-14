@@ -2,8 +2,8 @@ import pg from 'pg';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Entry, EntryFilters, EntryWithStatus, Status, StatusPatch, Summary } from '../types.js';
-import type { Store, UpsertResult } from './store.js';
+import type { Entry, EntryFilters, EntryWithStatus, Ivs, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import { normalizeSpecimen, type SpecimenSyncResult, type Store, type UpsertResult } from './store.js';
 
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
 
@@ -23,6 +23,21 @@ interface EntryRow {
   s_game_origin: string | null;
   s_method: string | null;
   s_notes: string | null;
+  sp_entry_key: string | null;
+  sp_shiny: boolean | null;
+  sp_event: boolean | null;
+  sp_level: number | null;
+  sp_origin_game: string | null;
+  sp_met_year: number | null;
+  sp_iv_perfect: number | null;
+  sp_ivs: Ivs | null;
+  sp_tera: string | null;
+  sp_ball: string | null;
+  sp_nature: string | null;
+  sp_ability: string | null;
+  sp_ribbons: string[] | null;
+  sp_nickname: string | null;
+  sp_ot: string | null;
 }
 
 function rowToEntry(row: EntryRow): EntryWithStatus {
@@ -45,6 +60,23 @@ function rowToEntry(row: EntryRow): EntryWithStatus {
       method: row.s_method,
       notes: row.s_notes,
     },
+    specimen: row.sp_entry_key === null ? null : {
+      entryKey: row.sp_entry_key,
+      shiny: row.sp_shiny ?? false,
+      event: row.sp_event ?? false,
+      level: row.sp_level,
+      originGame: row.sp_origin_game,
+      metYear: row.sp_met_year,
+      ivPerfect: row.sp_iv_perfect,
+      ivs: row.sp_ivs,
+      tera: row.sp_tera,
+      ball: row.sp_ball,
+      nature: row.sp_nature,
+      ability: row.sp_ability,
+      ribbons: row.sp_ribbons ?? [],
+      nickname: row.sp_nickname,
+      ot: row.sp_ot,
+    },
   };
 }
 
@@ -52,9 +84,15 @@ const BASE_SELECT = `
   select e.entry_key, e.dex, e.name, e.form_slug, e.form_label, e.gender,
          e.types, e.generation, e.sprite_url, e.is_cosmetic,
          s.caught as s_caught, s.caught_at as s_caught_at,
-         s.game_origin as s_game_origin, s.method as s_method, s.notes as s_notes
+         s.game_origin as s_game_origin, s.method as s_method, s.notes as s_notes,
+         sp.entry_key as sp_entry_key, sp.shiny as sp_shiny, sp.event as sp_event,
+         sp.level as sp_level, sp.origin_game as sp_origin_game, sp.met_year as sp_met_year,
+         sp.iv_perfect as sp_iv_perfect, sp.ivs as sp_ivs, sp.tera as sp_tera,
+         sp.ball as sp_ball, sp.nature as sp_nature, sp.ability as sp_ability,
+         sp.ribbons as sp_ribbons, sp.nickname as sp_nickname, sp.ot as sp_ot
   from entries e
   left join status s using (entry_key)
+  left join specimen sp using (entry_key)
 `;
 
 const ORDER_BY = `
@@ -237,6 +275,51 @@ export class PgStore implements Store {
       method: row.method,
       notes: row.notes,
     };
+  }
+
+  async replaceSpecimens(inputs: SpecimenInput[]): Promise<SpecimenSyncResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      // Which payload keys exist in the catalogue? (report the rest as unmatched)
+      const keys = inputs.map((i) => i.entryKey);
+      const present = new Set<string>();
+      if (keys.length > 0) {
+        const res = await client.query<{ entry_key: string }>(
+          'select entry_key from entries where entry_key = any($1)',
+          [keys],
+        );
+        for (const r of res.rows) present.add(r.entry_key);
+      }
+      const unmatched = keys.filter((k) => !present.has(k));
+
+      // Full-sync: clear then insert the matched set.
+      await client.query('delete from specimen');
+      let upserted = 0;
+      for (const input of inputs) {
+        if (!present.has(input.entryKey)) continue;
+        const s = normalizeSpecimen(input);
+        await client.query(
+          `insert into specimen
+             (entry_key, shiny, event, level, origin_game, met_year, iv_perfect, ivs,
+              tera, ball, nature, ability, ribbons, nickname, ot)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          [
+            s.entryKey, s.shiny, s.event, s.level, s.originGame, s.metYear, s.ivPerfect,
+            s.ivs === null ? null : JSON.stringify(s.ivs),
+            s.tera, s.ball, s.nature, s.ability, s.ribbons, s.nickname, s.ot,
+          ],
+        );
+        upserted += 1;
+      }
+      await client.query('commit');
+      return { upserted, unmatched };
+    } catch (err) {
+      await client.query('rollback');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async ready(): Promise<void> {
