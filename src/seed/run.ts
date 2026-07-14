@@ -4,7 +4,7 @@ import type { Entry, Obtainability } from '../types.js';
 import { PokeApiClient, mapLimit, type RawForm, type RawPokemon } from './pokeapi.js';
 import { expandSpecies, generationNumber, includedVarieties, neededForms } from './expand.js';
 import { VERSION_TO_GAME } from '../obtainability/games.js';
-import { chainAncestors, computeObtainability } from '../obtainability/compute.js';
+import { chainAncestors, computeObtainability, ownDirectlyObtainableGames } from '../obtainability/compute.js';
 
 interface SpeciesInfo {
   dex: number;
@@ -92,7 +92,9 @@ async function main(): Promise<void> {
 
   // Obtainability pass 2: derive evolution availability (a mon is reachable in
   // game X if a pre-evolution is obtainable there) and compute per-species.
-  const wildGamesByDex = new Map(speciesInfo.map((s) => [s.dex, s.wildGameIds]));
+  // A descendant is reachable in game X if a pre-evolution is *directly*
+  // obtainable there — wild OR curated gift/static (e.g. a starter gift).
+  const directGamesByDex = new Map(speciesInfo.map((s) => [s.dex, ownDirectlyObtainableGames(s.dex, s.wildGameIds)]));
   const nameToDex = new Map(speciesInfo.map((s) => [s.name, s.dex]));
   const obByDex = new Map<number, Obtainability>();
   await mapLimit(speciesInfo, concurrency, async (s) => {
@@ -102,7 +104,7 @@ async function main(): Promise<void> {
         const chain = await client.evolutionChain(s.evolutionChainUrl);
         for (const ancestor of chainAncestors(chain.chain, s.name)) {
           const dex = nameToDex.get(ancestor);
-          for (const g of (dex !== undefined ? wildGamesByDex.get(dex) : undefined) ?? []) evolvedFrom.add(g);
+          for (const g of (dex !== undefined ? directGamesByDex.get(dex) : undefined) ?? []) evolvedFrom.add(g);
         }
       } catch { /* chain unavailable — no evolution-derived availability */ }
     }

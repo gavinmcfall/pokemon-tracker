@@ -322,9 +322,11 @@ export class PgStore implements Store {
       }
       const unmatched = keys.filter((k) => !present.has(k));
 
-      // Full-sync: clear then insert the matched set.
+      // Full-sync: clear then insert the matched set. `on conflict` makes a
+      // duplicate entryKey in the payload last-write-wins (matching MemoryStore)
+      // instead of throwing a primary-key violation.
       await client.query('delete from specimen');
-      let upserted = 0;
+      const seen = new Set<string>();
       for (const input of inputs) {
         if (!present.has(input.entryKey)) continue;
         const s = normalizeSpecimen(input);
@@ -332,17 +334,22 @@ export class PgStore implements Store {
           `insert into specimen
              (entry_key, shiny, event, level, origin_game, met_year, iv_perfect, ivs,
               tera, ball, nature, ability, ribbons, nickname, ot)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           on conflict (entry_key) do update set
+             shiny=excluded.shiny, event=excluded.event, level=excluded.level,
+             origin_game=excluded.origin_game, met_year=excluded.met_year, iv_perfect=excluded.iv_perfect,
+             ivs=excluded.ivs, tera=excluded.tera, ball=excluded.ball, nature=excluded.nature,
+             ability=excluded.ability, ribbons=excluded.ribbons, nickname=excluded.nickname, ot=excluded.ot`,
           [
             s.entryKey, s.shiny, s.event, s.level, s.originGame, s.metYear, s.ivPerfect,
             s.ivs === null ? null : JSON.stringify(s.ivs),
             s.tera, s.ball, s.nature, s.ability, s.ribbons, s.nickname, s.ot,
           ],
         );
-        upserted += 1;
+        seen.add(input.entryKey);
       }
       await client.query('commit');
-      return { upserted, unmatched };
+      return { upserted: seen.size, unmatched };
     } catch (err) {
       await client.query('rollback');
       throw err;
@@ -366,22 +373,31 @@ export class PgStore implements Store {
       }
       const unmatched = keys.filter((k) => !present.has(k));
 
+      // `on conflict` makes a duplicate entryKey last-write-wins (matching
+      // MemoryStore) rather than throwing a primary-key violation.
       await client.query('delete from obtainability');
-      let upserted = 0;
+      const seen = new Set<string>();
       for (const { entryKey, obtainability: o } of records) {
         if (!present.has(entryKey)) continue;
         await client.query(
           `insert into obtainability
              (entry_key, availability, gmax_capable, tera_available, catchable_on_switch,
               shiny_legal_somewhere, unobtainable_legit, gender_visual_diff, shiny_locked_in, origin_games)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           on conflict (entry_key) do update set
+             availability=excluded.availability, gmax_capable=excluded.gmax_capable,
+             tera_available=excluded.tera_available, catchable_on_switch=excluded.catchable_on_switch,
+             shiny_legal_somewhere=excluded.shiny_legal_somewhere, unobtainable_legit=excluded.unobtainable_legit,
+             gender_visual_diff=excluded.gender_visual_diff, shiny_locked_in=excluded.shiny_locked_in,
+             origin_games=excluded.origin_games`,
           [
             entryKey, JSON.stringify(o.availability), o.gmaxCapable, o.teraAvailable, o.catchableOnSwitch,
             o.shinyLegalSomewhere, o.unobtainableLegit, o.genderVisualDiff, o.shinyLockedIn, o.originGames,
           ],
         );
-        upserted += 1;
+        seen.add(entryKey);
       }
+      const upserted = seen.size;
       await client.query('commit');
       return { upserted, unmatched };
     } catch (err) {

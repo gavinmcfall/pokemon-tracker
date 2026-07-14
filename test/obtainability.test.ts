@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RawChainLink } from '../src/seed/pokeapi.js';
-import { chainAncestors, computeObtainability } from '../src/obtainability/compute.js';
+import { chainAncestors, computeObtainability, ownDirectlyObtainableGames } from '../src/obtainability/compute.js';
 
 // Charmander → Charmeleon → Charizard
 const charizardChain: RawChainLink = {
@@ -34,6 +34,17 @@ describe('chainAncestors', () => {
   });
   it('returns empty for a species not in the chain', () => {
     expect(chainAncestors(charizardChain, 'pikachu')).toEqual([]);
+  });
+});
+
+describe('ownDirectlyObtainableGames', () => {
+  it('unions wild encounters with curated static + gift (so descendants inherit them)', () => {
+    // Chespin (650) is a Kalos starter gift; Zacian (888) is a Galar static.
+    expect([...ownDirectlyObtainableGames(650, [])]).toEqual(['xy']);
+    expect([...ownDirectlyObtainableGames(888, [])]).toEqual(['swsh']);
+    // merges with wild games; a mon with no curation returns just its wild games
+    expect([...ownDirectlyObtainableGames(650, ['sv'])].sort()).toEqual(['sv', 'xy']);
+    expect([...ownDirectlyObtainableGames(19, ['rb'])]).toEqual(['rb']);
   });
 });
 

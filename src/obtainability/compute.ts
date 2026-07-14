@@ -46,6 +46,19 @@ export function chainAncestors(chain: RawChainLink, target: string): string[] {
   return path;
 }
 
+/**
+ * Games where a species is *directly* obtainable — wild encounters plus its own
+ * curated static/gift availability. This (not just wild) is the correct basis
+ * for evolution-derived availability of its descendants: a starter obtained by
+ * gift and then evolved should pass that game down the line.
+ */
+export function ownDirectlyObtainableGames(dex: number, wildGameIds: Iterable<string>): Set<string> {
+  const games = new Set<string>(wildGameIds);
+  for (const s of STATIC_AVAILABILITY[dex] ?? []) games.add(s.gameId);
+  for (const g of STARTER_GIFTS[dex] ?? []) games.add(g);
+  return games;
+}
+
 export function computeObtainability(input: ObtainabilityInput): Obtainability {
   const { dex, generation, hasGenderDifferences, hasGmaxVariety } = input;
   const shinyLockedEverywhere = SHINY_LOCKED_EVERYWHERE.has(dex);
