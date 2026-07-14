@@ -158,10 +158,16 @@ export function expandSpecies(bundle: SpeciesBundle, tier: SeedTier): Entry[] {
       // (frillish-male/-female) — those fold into the gender dimension.
       const baseTypes = typesOf(pokemon);
       for (const form of siblingForms) {
+        // The base pokemon-form (empty form_name, e.g. `pichu`, `genesect`)
+        // among a set of named siblings (`pichu-spiky-eared`, `genesect-douse`)
+        // is the species' default slot — not a form of its own. Without this,
+        // its name-derived slug (`pichu`) would leave the species with no
+        // `default` entry and mark it cosmetic.
+        const isBaseForm = form.form_name === '';
         const rawOwn = stripPrefix(stripPrefix(form.name, pokemon.name), species.name);
         const parts = (formSlug === 'default' ? [] : formSlug.split('_')).concat(rawOwn.split('-'));
         const split = splitGenderSegment(parts);
-        const slotSlug = split.parts.length === 0 ? 'default' : toSlug(split.parts.join('-'));
+        const slotSlug = isBaseForm || split.parts.length === 0 ? 'default' : toSlug(split.parts.join('-'));
         const slotGender = split.gender ?? genderOverride;
         const formTypes = typesOf(pokemon, form);
         slots.push({
@@ -170,7 +176,7 @@ export function expandSpecies(bundle: SpeciesBundle, tier: SeedTier): Entry[] {
             ? null
             : englishName(form.names, form.form_name ? `${form.form_name} ${name}` : name),
           types: formTypes,
-          isCosmetic: split.gender === null && sameTypes(formTypes, baseTypes),
+          isCosmetic: !isBaseForm && split.gender === null && sameTypes(formTypes, baseTypes),
           // The form sprite is the right one for both genders; a generic
           // front_female would show the wrong pattern/trim.
           spriteDefault: form.sprites?.front_default ?? pokemon.sprites.front_default,

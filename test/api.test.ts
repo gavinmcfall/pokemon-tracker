@@ -141,6 +141,30 @@ describe('POST /api/import and GET /api/export', () => {
     expect(res.status).toBe(400);
   });
 
+  it('dryRun=1 reports the would-be changes without writing', async () => {
+    // 0006-mega_x-male is currently uncaught; dryRun should flag it as a change
+    // but leave the store untouched.
+    const csv = 'entryKey,caught\n0006-mega_x-male,true\n0006-default-male,false\n';
+    const res = await app.request('/api/import?dryRun=1', {
+      method: 'POST',
+      headers: { 'content-type': 'text/csv' },
+      body: csv,
+    });
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.dryRun).toBe(true);
+    expect(body.matched).toBe(2);
+    expect(body.wouldUpdate).toBe(2);
+    // only the mega_x row flips state (default-male was already uncaught)
+    expect(body.changed).toBe(1);
+    expect(body.changes).toEqual([
+      { entryKey: '0006-mega_x-male', caught: { from: false, to: true }, metaChanged: false },
+    ]);
+    // nothing was actually written
+    const caught = await json(await get('/api/entries?status=caught'));
+    expect(caught).toHaveLength(0);
+  });
+
   it('export → import round-trips the collection', async () => {
     await store.setStatus({ entryKey: '0666-fancy-female', caught: true, gameOrigin: 'emu:Violet' });
     const exportRes = await get('/api/export');

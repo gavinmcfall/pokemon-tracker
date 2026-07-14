@@ -130,8 +130,36 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
     if (!text || text.trim() === '') return badRequest('no CSV provided — send multipart field "file" or a text/csv body');
     if (text.length > MAX_IMPORT_BYTES) return badRequest('file too large (max 5 MiB)');
 
+    const dryRun = ['1', 'true', 'yes'].includes((c.req.query('dryRun') ?? '').toLowerCase());
     const entries = await store.listEntries({});
     const plan = planImport(text, entries);
+
+    // dryRun: resolve + report only, no writes. Returns the exact set of slots
+    // whose state would change, so a recurring importer can detect a real delta
+    // (and skip the write when there's nothing to do).
+    if (dryRun) {
+      const byKey = new Map(entries.map((e) => [e.entryKey, e]));
+      const changes = [];
+      for (const patch of plan.patches) {
+        const cur = byKey.get(patch.entryKey)?.status ?? null;
+        const before = cur?.caught ?? false;
+        const metaChanged =
+          (patch.gameOrigin !== undefined && patch.gameOrigin !== (cur?.gameOrigin ?? undefined)) ||
+          (patch.method !== undefined && patch.method !== (cur?.method ?? undefined)) ||
+          (patch.notes !== undefined && patch.notes !== (cur?.notes ?? undefined));
+        if (before !== patch.caught || metaChanged) {
+          changes.push({ entryKey: patch.entryKey, caught: { from: before, to: patch.caught }, metaChanged });
+        }
+      }
+      return c.json({
+        dryRun: true,
+        matched: plan.matchedRows,
+        wouldUpdate: plan.patches.length,
+        changed: changes.length,
+        changes,
+        unmatched: plan.unmatched,
+      });
+    }
 
     let updated = 0;
     for (const patch of plan.patches) {
@@ -139,7 +167,7 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
       const res = await store.setStatus(statusPatch);
       if (res !== null) updated += 1;
     }
-    return c.json({ matched: plan.matchedRows, updated, unmatched: plan.unmatched });
+    return c.json({ dryRun: false, matched: plan.matchedRows, updated, unmatched: plan.unmatched });
   });
 
   app.get('/api/export', async (c) => {
