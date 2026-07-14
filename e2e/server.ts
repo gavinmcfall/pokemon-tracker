@@ -37,6 +37,16 @@ async function resetState(): Promise<void> {
   await store.reset();
   await store.upsertEntries(CONTRACT_ENTRIES);
   await store.setStatus({ entryKey: '0666-fancy-female', caught: true, gameOrigin: 'emu:Violet' });
+  // HOME-derived specimen on the one caught entry, so badges + the detail-sheet
+  // Best Specimen zone can be exercised end to end.
+  await store.replaceSpecimens([
+    {
+      entryKey: '0666-fancy-female', shiny: true, event: true, level: 100, originGame: 'sv',
+      metYear: 2023, ivPerfect: 6, ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 },
+      tera: 'fairy', ball: 'Cherish Ball', nature: 'Modest', ability: 'Shield Dust',
+      ribbons: ['Classic'], nickname: 'Papillon', ot: 'Serina',
+    },
+  ]);
 }
 await resetState();
 

@@ -45,6 +45,7 @@ describe('GET /api/entries', () => {
       spriteUrl: 'https://sprites.example/10034.png',
       isCosmetic: false,
       status: null,
+      specimen: null,
     });
   });
 
@@ -186,6 +187,46 @@ describe('POST /api/import and GET /api/export', () => {
     const restored = await fresh.listEntries({ status: 'caught' });
     expect(restored.map((e) => e.entryKey)).toEqual(['0666-fancy-female']);
     expect(restored[0]!.status).toMatchObject({ gameOrigin: 'emu:Violet' });
+  });
+});
+
+describe('POST /api/specimens', () => {
+  it('syncs specimens, embeds them in GET /api/entries, reports unmatched', async () => {
+    const res = await app.request('/api/specimens', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify([
+        { entryKey: '0006-mega_x-male', shiny: true, event: false, originGame: 'swsh', ivPerfect: 6,
+          ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }, ribbons: ['Wishing'], ot: 'Ash' },
+        { entryKey: '9999-nope-male', shiny: true },
+      ]),
+    });
+    expect(res.status).toBe(200);
+    expect(await json(res)).toEqual({ synced: 1, unmatched: ['9999-nope-male'] });
+
+    const entries = await json(await get('/api/entries'));
+    const mega = entries.find((e: { entryKey: string }) => e.entryKey === '0006-mega_x-male');
+    expect(mega.specimen).toMatchObject({ shiny: true, originGame: 'swsh', ivPerfect: 6, ot: 'Ash' });
+    const other = entries.find((e: { entryKey: string }) => e.entryKey === '0006-default-male');
+    expect(other.specimen).toBeNull();
+  });
+
+  it('accepts a { specimens: [...] } envelope too', async () => {
+    const res = await app.request('/api/specimens', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ specimens: [{ entryKey: '0150-default-genderless', event: true }] }),
+    });
+    expect(await json(res)).toEqual({ synced: 1, unmatched: [] });
+  });
+
+  it('rejects a non-array / entry without entryKey', async () => {
+    expect((await app.request('/api/specimens', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nope: 1 }),
+    })).status).toBe(400);
+    expect((await app.request('/api/specimens', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify([{ shiny: true }]),
+    })).status).toBe(400);
   });
 });
 

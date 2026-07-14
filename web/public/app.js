@@ -24,6 +24,15 @@ const PLATFORM_ORDER = ['gb','gbc','gba','ds','3ds','switch','switch2','mobile']
 const PLATFORM_LABELS = { gb:'GAME BOY', gbc:'GAME BOY COLOR', gba:'GAME BOY ADVANCE', ds:'NINTENDO DS', '3ds':'NINTENDO 3DS', switch:'SWITCH', switch2:'SWITCH 2', mobile:'MOBILE' };
 const EMU_SUGGESTIONS = ['emu:FireRed','emu:LeafGreen','emu:HeartGold','emu:SoulSilver','emu:Emerald','emu:Platinum'];
 const METHOD_FALLBACK = ['caught','bred','hatched','traded','evolved','gift','transferred'];
+// Friendly labels for the HOME originGame slugs (falls back to UPPERCASE).
+const GAME_LABELS = {
+  rb:'Red/Blue', y:'Yellow', gs:'Gold/Silver', c:'Crystal', rs:'Ruby/Sapphire', e:'Emerald',
+  frlg:'FireRed/LeafGreen', dp:'Diamond/Pearl', pt:'Platinum', hgss:'HeartGold/SoulSilver',
+  bw:'Black/White', b2w2:'Black 2/White 2', xy:'X/Y', oras:'Omega Ruby/Alpha Sapphire',
+  sm:'Sun/Moon', usum:'Ultra Sun/Ultra Moon', lgpe:'Let’s Go', swsh:'Sword/Shield',
+  bdsp:'Brilliant Diamond/Shining Pearl', pla:'Legends: Arceus', sv:'Scarlet/Violet', go:'Pokémon GO',
+};
+const gameLabel = (slug) => (slug ? (GAME_LABELS[slug] ?? slug.toUpperCase()) : null);
 
 const LD = (l, d) => `light-dark(${l}, ${d})`;
 const T = {
@@ -35,6 +44,7 @@ const T = {
   muted: LD('#5A6472', '#8B94A4'),
   red: LD('#E3350D', '#F4503B'),
   gray: LD('#C6CDD5', '#3A4450'),
+  gold: LD('#B8860B', '#F7D02C'),
 };
 
 const THEME_KEY = 'livingdex-theme';
@@ -146,6 +156,16 @@ function tileStyle(e, isCaught) {
 
 const genderMark = (g) => (g === 'male' ? '♂' : g === 'female' ? '♀' : '');
 const isCaught = (e) => Boolean(e.status && e.status.caught);
+/** HOME-derived at-a-glance markers shown on caught tiles. */
+function specimenBadges(e) {
+  const sp = e.specimen;
+  if (!sp) return [];
+  const out = [];
+  if (sp.shiny) out.push({ kind: 'shiny', glyph: '✨', title: 'Shiny' });
+  if (sp.event) out.push({ kind: 'event', glyph: '🎁', title: 'Event / gift' });
+  if (sp.ivPerfect === 6) out.push({ kind: 'sixiv', glyph: '★', title: 'Perfect IVs (6×31)' });
+  return out;
+}
 const hasEnrichment = (e) => Array.isArray(e.availability);
 function enrichmentPresent() { return state.entries.some(hasEnrichment); }
 
@@ -343,7 +363,14 @@ function tileMarkup(e) {
   const hintInfo = tileHint(e);
   const hint = elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', fontWeight: '700', letterSpacing: '0.05em', color: 'var(--num)', opacity: '0.85' }, hintInfo.hint);
   if (hintInfo.title) hint.title = hintInfo.title;
-  head.append(num, gender, spacer, hint);
+  const badges = elem('span', { display: 'inline-flex', alignItems: 'center', gap: '2px', fontSize: '11px', lineHeight: '1' });
+  badges.className = 'tile-badges';
+  for (const b of specimenBadges(e)) {
+    const bg = elem('span', { filter: b.kind === 'sixiv' ? 'none' : 'saturate(1.1)', color: b.kind === 'sixiv' ? 'var(--dot1)' : 'inherit' }, b.glyph);
+    bg.className = 'tile-badge'; bg.dataset.kind = b.kind; bg.title = b.title; bg.setAttribute('aria-label', b.title);
+    badges.append(bg);
+  }
+  head.append(num, gender, spacer, badges, hint);
 
   const img = elem('img', { filter: 'var(--sf)', transition: 'filter 0.25s ease', imageRendering: 'pixelated', margin: '2px 0' });
   img.src = e.spriteUrl; img.alt = ''; img.width = 68; img.height = 68; img.loading = 'lazy'; img.draggable = false;
@@ -584,6 +611,72 @@ function renderSheetInto(e, refocusCaught) {
   my.append(notesField);
 
   panel.append(head, my);
+
+  // best specimen (HOME-derived; present only on caught slots that were imported)
+  if (e.specimen) {
+    const sp = e.specimen;
+    const zone = elem('div', null); zone.className = 'sheet-section specimen';
+    zone.append(elem('span', null, 'BEST SPECIMEN')); zone.firstChild.className = 'sheet-h';
+
+    const pills = [];
+    if (sp.shiny) pills.push({ text: '✨ SHINY', color: T.gold });
+    if (sp.event) pills.push({ text: '🎁 EVENT', color: c1 });
+    if (sp.ivPerfect === 6) pills.push({ text: '★ 6IV', color: c1 });
+    if (sp.tera) pills.push({ text: `TERA ${sp.tera.toUpperCase()}`, color: TYPE_COLORS[sp.tera.toLowerCase()] ?? c1 });
+    if (pills.length) {
+      const row = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '6px' });
+      for (const p of pills) row.append(elem('span', {
+        display: 'inline-flex', alignItems: 'center', minHeight: '28px', padding: '0 11px', borderRadius: '999px',
+        background: `color-mix(in oklab, ${p.color} 22%, ${T.card})`, border: `1px solid color-mix(in oklab, ${p.color} 55%, ${T.border})`,
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: '11.5px', fontWeight: '700', letterSpacing: '0.05em', color: T.text,
+      }, p.text));
+      zone.append(row);
+    }
+
+    const facts = [];
+    const origin = [gameLabel(sp.originGame), sp.metYear].filter(Boolean).join(' · ');
+    if (origin) facts.push(['Origin', origin]);
+    if (sp.level != null) facts.push(['Level', String(sp.level)]);
+    if (sp.nature) facts.push(['Nature', sp.nature]);
+    if (sp.ability) facts.push(['Ability', sp.ability]);
+    if (sp.ball) facts.push(['Ball', sp.ball]);
+    if (sp.ivPerfect != null) facts.push(['Perfect IVs', `${sp.ivPerfect}/6`]);
+    if (sp.nickname) facts.push(['Nickname', sp.nickname]);
+    if (sp.ot) facts.push(['OT', sp.ot]);
+    if (facts.length) {
+      const g = elem('div', { display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 14px', alignItems: 'baseline' });
+      for (const [k, v] of facts) {
+        g.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.08em', color: T.muted }, k.toUpperCase()));
+        g.append(elem('span', { fontSize: '13px', color: T.text }, v));
+      }
+      zone.append(g);
+    }
+
+    if (sp.ivs) {
+      const ivWrap = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '5px' });
+      for (const [k, lab] of [['hp', 'HP'], ['atk', 'ATK'], ['def', 'DEF'], ['spa', 'SPA'], ['spd', 'SPD'], ['spe', 'SPE']]) {
+        const v = sp.ivs[k]; const max = v === 31;
+        ivWrap.append(elem('span', {
+          display: 'inline-flex', gap: '5px', alignItems: 'center', minHeight: '26px', padding: '0 9px', borderRadius: '8px',
+          background: max ? `color-mix(in oklab, ${c1} 26%, ${T.card})` : T.raised,
+          border: `1px solid ${max ? `color-mix(in oklab, ${c1} 55%, ${T.border})` : T.border}`,
+          fontFamily: "'IBM Plex Mono', monospace", fontSize: '11.5px', color: T.text, fontWeight: max ? '700' : '400',
+        }, `${lab} ${v}`));
+      }
+      zone.append(ivWrap);
+    }
+
+    if (sp.ribbons && sp.ribbons.length) {
+      const row = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '6px' });
+      for (const r of sp.ribbons) row.append(elem('span', {
+        display: 'inline-flex', alignItems: 'center', minHeight: '26px', padding: '0 10px', borderRadius: '999px',
+        background: T.raised, border: `1px solid ${T.border}`, fontSize: '12px', color: T.text,
+      }, `🎀 ${r}`));
+      zone.append(row);
+    }
+
+    panel.append(zone);
+  }
 
   // obtainability (only when the API provides it)
   if (hasEnrichment(e)) {

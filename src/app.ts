@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Store } from './store/store.js';
-import type { EntryFilters, EntryWithStatus, StatusPatch } from './types.js';
+import type { EntryFilters, EntryWithStatus, SpecimenInput, StatusPatch } from './types.js';
 import { exportCsv, planImport } from './csv.js';
 import type { SpriteMirror } from './sprites.js';
 
@@ -168,6 +168,35 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
       if (res !== null) updated += 1;
     }
     return c.json({ dryRun: false, matched: plan.matchedRows, updated, unmatched: plan.unmatched });
+  });
+
+  // Full-sync the HOME-derived specimen set. Accepts either a bare array or
+  // { specimens: [...] }. Replaces the whole set (source regenerates each run);
+  // entryKeys not in the catalogue are reported, never fatal.
+  app.post('/api/specimens', async (c) => {
+    let parsed: unknown;
+    try {
+      parsed = await c.req.json();
+    } catch {
+      return badRequest('body must be JSON (an array of specimens or { specimens: [...] })');
+    }
+    const raw = Array.isArray(parsed)
+      ? parsed
+      : (parsed && typeof parsed === 'object' && Array.isArray((parsed as { specimens?: unknown }).specimens)
+          ? (parsed as { specimens: unknown[] }).specimens
+          : null);
+    if (raw === null) return badRequest('expected an array of specimens or { specimens: [...] }');
+
+    const inputs: SpecimenInput[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== 'object') return badRequest('each specimen must be an object');
+      const key = (item as { entryKey?: unknown }).entryKey;
+      if (typeof key !== 'string' || key === '') return badRequest('each specimen needs a string entryKey');
+      inputs.push(item as SpecimenInput);
+    }
+
+    const result = await store.replaceSpecimens(inputs);
+    return c.json({ synced: result.upserted, unmatched: result.unmatched });
   });
 
   app.get('/api/export', async (c) => {

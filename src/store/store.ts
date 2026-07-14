@@ -1,9 +1,37 @@
-import type { Entry, EntryFilters, EntryWithStatus, Status, StatusPatch, Summary } from '../types.js';
+import type { Entry, EntryFilters, EntryWithStatus, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
 
 export interface UpsertResult {
   inserted: number;
   updated: number;
   unchanged: number;
+}
+
+export interface SpecimenSyncResult {
+  /** How many specimens were written (matched a live entry). */
+  upserted: number;
+  /** entryKeys in the payload with no matching catalogue entry (reported, not fatal). */
+  unmatched: string[];
+}
+
+/** Normalize a lenient ingest payload into a full Specimen (defaults + null-fill). */
+export function normalizeSpecimen(input: SpecimenInput): Specimen {
+  return {
+    entryKey: input.entryKey,
+    shiny: input.shiny ?? false,
+    event: input.event ?? false,
+    level: input.level ?? null,
+    originGame: input.originGame ?? null,
+    metYear: input.metYear ?? null,
+    ivPerfect: input.ivPerfect ?? null,
+    ivs: input.ivs ?? null,
+    tera: input.tera ?? null,
+    ball: input.ball ?? null,
+    nature: input.nature ?? null,
+    ability: input.ability ?? null,
+    ribbons: input.ribbons ?? [],
+    nickname: input.nickname ?? null,
+    ot: input.ot ?? null,
+  };
 }
 
 /**
@@ -18,6 +46,12 @@ export interface Store {
   getSummary(gen?: number): Promise<Summary>;
   /** Returns null when entryKey does not exist. */
   setStatus(patch: StatusPatch): Promise<Status | null>;
+  /**
+   * Full-sync the specimen set (HOME regenerates the whole set each run):
+   * replaces all specimens with the given payload, keeping only those whose
+   * entryKey matches a live entry. Unmatched keys are reported, never fatal.
+   */
+  replaceSpecimens(inputs: SpecimenInput[]): Promise<SpecimenSyncResult>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
