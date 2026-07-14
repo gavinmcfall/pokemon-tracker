@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AvailabilityEntry, Entry, EntryFilters, EntryWithStatus, Ivs, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
-import { normalizeSpecimen, type ObtainabilityRecord, type SpecimenSyncResult, type Store, type UpsertResult } from './store.js';
+import { normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
 
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
 
@@ -306,7 +306,7 @@ export class PgStore implements Store {
     };
   }
 
-  async replaceSpecimens(inputs: SpecimenInput[]): Promise<SpecimenSyncResult> {
+  async replaceSpecimens(inputs: SpecimenInput[]): Promise<SyncResult> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
@@ -358,7 +358,7 @@ export class PgStore implements Store {
     }
   }
 
-  async replaceObtainability(records: ObtainabilityRecord[]): Promise<SpecimenSyncResult> {
+  async replaceObtainability(records: ObtainabilityRecord[]): Promise<SyncResult> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');

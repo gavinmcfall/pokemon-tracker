@@ -25,8 +25,13 @@ export interface ObtainabilityInput {
 // Most-direct method wins when a game offers a slot more than one way.
 const METHOD_PRIORITY = ['wild', 'gift', 'static', 'event', 'fossil', 'roaming', 'trade', 'evolve'];
 
+// An unrecognized method ranks last, so it never spuriously beats a known one.
+function rank(method: string): number {
+  const i = METHOD_PRIORITY.indexOf(method);
+  return i === -1 ? METHOD_PRIORITY.length : i;
+}
 function moreDirect(a: string, b: string): string {
-  return METHOD_PRIORITY.indexOf(a) <= METHOD_PRIORITY.indexOf(b) ? a : b;
+  return rank(a) <= rank(b) ? a : b;
 }
 
 /** Names of every species strictly upstream of `target` on its evolution path (root → target). */

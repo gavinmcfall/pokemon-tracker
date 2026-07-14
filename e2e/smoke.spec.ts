@@ -197,14 +197,17 @@ test('obtainability: filters appear and the detail sheet shows availability', as
   await expect(obtain).toContainText('GMAX');
 });
 
-test('obtainability: the GMax filter narrows the grid to gmax-capable entries', async ({ page }) => {
-  // Gen I: Charizard default + mega_x are gmax-capable; Mewtwo is not
+test('obtainability filter hides known non-matches but keeps entries with unknown data', async ({ page }) => {
+  // Gen I harness: Charizard default is Switch-catchable (known true); mega_x is
+  // not (known false); Mewtwo has no obtainability at all (unknown). The Switch
+  // filter must hide the known-false one but keep the unknown one — we never
+  // hide on a guess.
   await expect(page.locator(gridButton)).toHaveCount(3);
-  await page.locator('#obtain-chips button[data-obtain="gmax"]').click();
+  await page.locator('#obtain-chips button[data-obtain="switch"]').click();
   await expect(page.locator(gridButton)).toHaveCount(2);
-  for (const key of ['0006-default-male', '0006-mega_x-male']) {
-    await expect(page.locator(`${gridButton}[data-entry-key="${key}"]`)).toBeVisible();
-  }
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-default-male"]`)).toBeVisible();   // known true → kept
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-mega_x-male"]`)).toHaveCount(0);   // known false → hidden
+  await expect(page.locator(`${gridButton}[data-entry-key="0150-default-genderless"]`)).toBeVisible(); // unknown → kept
 });
 
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {

@@ -177,10 +177,15 @@ function matchesFilters(e) {
   if (state.status === 'needed' && c) return false;
   if (state.status === 'caught' && !c) return false;
   const ob = state.obtain;
-  if (ob.switch && !e.catchableOnSwitch) return false;
-  if (ob.shiny && !e.shinyLegalSomewhere) return false;
-  if (ob.gmax && !e.gmaxCapable) return false;
-  if (ob.tera && !e.teraAvailable) return false;
+  // Obtainability filters exclude an entry only when we KNOW the flag is false
+  // (the entry has obtainability data). Entries with no data yet are "unknown"
+  // and are kept rather than silently hidden — we never assert a guess.
+  if (hasEnrichment(e)) {
+    if (ob.switch && !e.catchableOnSwitch) return false;
+    if (ob.shiny && !e.shinyLegalSomewhere) return false;
+    if (ob.gmax && !e.gmaxCapable) return false;
+    if (ob.tera && !e.teraAvailable) return false;
+  }
   if (state.gameFilter && !(hasEnrichment(e) && e.availability.some((a) => a.gameId === state.gameFilter))) return false;
   const q = state.query.trim().toLowerCase();
   if (q) {

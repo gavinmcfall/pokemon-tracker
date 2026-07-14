@@ -1,5 +1,5 @@
 import type { Entry, EntryFilters, EntryWithStatus, Obtainability, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
-import { applyStatusPatch, compareEntries, normalizeSpecimen, type ObtainabilityRecord, type SpecimenSyncResult, type Store, type UpsertResult } from './store.js';
+import { applyStatusPatch, compareEntries, normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
 
 /**
  * In-memory Store used by contract tests and the e2e harness. Must behave
@@ -90,7 +90,7 @@ export class MemoryStore implements Store {
     return { ...next };
   }
 
-  async replaceSpecimens(inputs: SpecimenInput[]): Promise<SpecimenSyncResult> {
+  async replaceSpecimens(inputs: SpecimenInput[]): Promise<SyncResult> {
     const unmatched: string[] = [];
     const next = new Map<string, Specimen>();
     for (const input of inputs) {
@@ -104,7 +104,7 @@ export class MemoryStore implements Store {
     return { upserted: next.size, unmatched };
   }
 
-  async replaceObtainability(records: ObtainabilityRecord[]): Promise<SpecimenSyncResult> {
+  async replaceObtainability(records: ObtainabilityRecord[]): Promise<SyncResult> {
     const unmatched: string[] = [];
     const next = new Map<string, Obtainability>();
     for (const r of records) {
