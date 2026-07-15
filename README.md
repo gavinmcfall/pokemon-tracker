@@ -169,27 +169,34 @@ refreshes, and a run against unchanged data is a zero-diff no-op.
 
 ## Obtainability
 
-The seed also derives a per-slot **obtainability** record (`src/obtainability/`,
-stored in the `obtainability` table, embedded in `GET /api/entries`):
+The seed derives a per-slot **obtainability** record (`src/obtainability/`,
+stored in the `obtainability` table, embedded in `GET /api/entries`) — **sourced
+from the local PokéAPI mirror** (see below), not live HTTP:
 
-- **Derived from PokéAPI** (accurate, no guessing): `availability[]` from the
-  wild-encounter tables **plus evolution-chain derivation** (a mon is reachable
-  in game X if a pre-evolution is catchable there — so Charizard inherits
-  Charmander's games as `method: "evolve"`); `gmaxCapable` (has a `-gmax`
-  variety), `genderVisualDiff` (`has_gender_differences`), `catchableOnSwitch`,
-  `teraAvailable` (obtainable in Scarlet/Violet), `originGames` (debut
-  generation's games).
-- **Curated overlay** (`src/obtainability/curated.ts`) for the finite facts
-  PokéAPI can't provide: static/gift availability for legendaries with no wild
-  tables, per-game shiny locks (gen 6–9 starters + box legendaries), and
-  shiny-locked-everywhere species. A spot-checkable, extensible v1 — defaults
-  are conservative (shiny is legal unless a curated entry says otherwise), so a
+- **Availability from pokédex membership** (`src/obtainability/from-mirror.ts`):
+  which games a species appears in (its game-specific regional Pokédex entries,
+  `pokemon_dex_numbers → pokedexes → version_groups`), mapped to our gameIds. A
+  wild-encounter check tags the method (`wild` vs `available`). Because a game's
+  Pokédex already lists legendaries, gift mons and evolved forms, this covers
+  **~99.7% of species** with accurate per-game availability and needs **no**
+  wild/evolution curation. `gmaxCapable`, `genderVisualDiff`,
+  `catchableOnSwitch`, `teraAvailable`, `originGames` come from the same tables.
+- **Curated overlay** (`src/obtainability/curated.ts`) now only for what the
+  data can't say: per-game **shiny locks** (gen 6–9 starters + box legendaries),
+  shiny-locked-everywhere species, and a small static/gift supplement. Defaults
+  stay conservative — shiny is legal unless a curated entry says otherwise, so a
   gap under-claims rather than misleads.
 
-Version→game rollup and platform grouping live in `src/obtainability/games.ts`.
-Known v1 limits (documented, not fabricated): obtainability is species-level
-(regional-form exclusivity isn't split out yet), and pure static/event mons
-outside the curated set show sparse availability rather than wrong data.
+Version-group→game rollup lives in `src/obtainability/games.ts`
+(`VERSION_GROUP_TO_GAME`; DLC folds into its base game, GameCube/JP/unreleased
+groups are unmapped → "unknown"). Known limits (documented, not fabricated):
+obtainability is species-level (pokédex membership can't split Alolan vs
+Kantonian Raichu — regional-form exclusivity is future work), and a handful of
+National-dex-only event mons show empty availability rather than a guess.
+
+The seed sources obtainability best-effort: if the mirror schema isn't populated
+yet it writes the catalogue and skips obtainability (leaving prior values), so
+run the `pokeapi-mirror` job before the seed.
 
 ## PokéAPI mirror (`src/mirror/`)
 

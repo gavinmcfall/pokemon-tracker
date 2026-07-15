@@ -60,6 +60,25 @@ export const VERSION_TO_GAME: Record<string, string> = {
   scarlet: 'sv', violet: 'sv',
 };
 
+/**
+ * PokéAPI `version_groups.identifier` → our gameId. DLC groups fold into their
+ * base game (the-isle-of-armor → swsh, the-indigo-disk → sv). GameCube spin-offs
+ * (colosseum, xd), Japan-only groups, and not-yet-released titles (legends-za,
+ * champions, mega-dimension) are intentionally unmapped — availability sourced
+ * from them is treated as "unknown" rather than guessed.
+ */
+export const VERSION_GROUP_TO_GAME: Record<string, string> = {
+  'red-blue': 'rb', yellow: 'yellow', 'gold-silver': 'gs', crystal: 'c',
+  'ruby-sapphire': 'rs', emerald: 'e', 'firered-leafgreen': 'frlg',
+  'diamond-pearl': 'dp', platinum: 'pt', 'heartgold-soulsilver': 'hgss',
+  'black-white': 'bw', 'black-2-white-2': 'b2w2', 'x-y': 'xy',
+  'omega-ruby-alpha-sapphire': 'oras', 'sun-moon': 'sm', 'ultra-sun-ultra-moon': 'usum',
+  'lets-go-pikachu-lets-go-eevee': 'lgpe', 'sword-shield': 'swsh',
+  'the-isle-of-armor': 'swsh', 'the-crown-tundra': 'swsh',
+  'brilliant-diamond-shining-pearl': 'bdsp', 'legends-arceus': 'pla',
+  'scarlet-violet': 'sv', 'the-teal-mask': 'sv', 'the-indigo-disk': 'sv',
+};
+
 const GAME_ORDER = new Map(GAMES.map((g, i) => [g.gameId, i]));
 
 /** Sort gameIds by release order. */

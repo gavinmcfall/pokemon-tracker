@@ -64,21 +64,36 @@ export function ownDirectlyObtainableGames(dex: number, wildGameIds: Iterable<st
   return games;
 }
 
-export function computeObtainability(input: ObtainabilityInput): Obtainability {
+/** A candidate way a slot is obtainable in a game, before dedup. */
+export interface ObtainSource {
+  gameId: string;
+  method: string;
+}
+
+export interface SourcedInput {
+  dex: number;
+  generation: number;
+  hasGenderDifferences: boolean;
+  hasGmaxVariety: boolean;
+  sources: ObtainSource[];
+}
+
+/**
+ * Assemble the final Obtainability from a raw source list (one entry per way a
+ * slot can be obtained in a game). Shared by the HTTP path (wild + evolution +
+ * curated) and the mirror path (pokédex membership + curated). Dedups to one
+ * method per game (most direct wins) and derives the flags.
+ */
+export function computeObtainabilityFromSources(input: SourcedInput): Obtainability {
   const { dex, generation, hasGenderDifferences, hasGmaxVariety } = input;
   const shinyLockedEverywhere = SHINY_LOCKED_EVERYWHERE.has(dex);
 
-  // Merge availability sources into one method per gameId (most direct wins).
   const byGame = new Map<string, string>();
-  const add = (gameId: string, method: string) => {
-    if (!GAME_BY_ID.has(gameId)) return;
-    const existing = byGame.get(gameId);
-    byGame.set(gameId, existing ? moreDirect(existing, method) : method);
-  };
-  for (const g of input.ownWildGameIds) add(g, 'wild');
-  for (const g of input.evolvedFromGameIds) add(g, 'evolve');
-  for (const s of STATIC_AVAILABILITY[dex] ?? []) add(s.gameId, s.method);
-  for (const g of STARTER_GIFTS[dex] ?? []) add(g, 'gift');
+  for (const s of input.sources) {
+    if (!GAME_BY_ID.has(s.gameId)) continue;
+    const existing = byGame.get(s.gameId);
+    byGame.set(s.gameId, existing ? moreDirect(existing, s.method) : s.method);
+  }
 
   const availability: AvailabilityEntry[] = [...byGame.entries()]
     .sort(([a], [b]) => byReleaseOrder(a, b))
@@ -105,4 +120,19 @@ export function computeObtainability(input: ObtainabilityInput): Obtainability {
     shinyLockedIn,
     originGames,
   };
+}
+
+/**
+ * HTTP-path entry point: builds sources from wild encounters + evolution-derived
+ * games + curated static/gift, then delegates. (The mirror path builds sources
+ * from pokédex membership instead and calls computeObtainabilityFromSources.)
+ */
+export function computeObtainability(input: ObtainabilityInput): Obtainability {
+  const sources: ObtainSource[] = [
+    ...input.ownWildGameIds.map((gameId) => ({ gameId, method: 'wild' })),
+    ...input.evolvedFromGameIds.map((gameId) => ({ gameId, method: 'evolve' })),
+    ...(STATIC_AVAILABILITY[input.dex] ?? []).map((s) => ({ gameId: s.gameId, method: s.method })),
+    ...(STARTER_GIFTS[input.dex] ?? []).map((gameId) => ({ gameId, method: 'gift' })),
+  ];
+  return computeObtainabilityFromSources({ ...input, sources });
 }
