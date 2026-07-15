@@ -73,6 +73,9 @@ GET  /api/games             -> GameWithOwnership[]  (individual releases — Red
        methods:[cartridge|emulator|romhack], notes })
 POST /api/ownership         { gameId, methods:[…], notes? } -> GameOwnership
        (gameId is a release slug e.g. "red"; multi-method; empty + no notes clears)
+GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game's
+       catches reach Pokémon HOME: reach native|go|bank|chain|none|unknown,
+       requiresBank, requiresGames (AND-of-ORs), human route string)
 GET  /api/sprites/status    -> { enabled, running, total, mirrored, fetched, failed, … }
 POST /api/sprites/mirror    -> 202; downloads all sprites to SPRITE_DIR in the background
 GET  /api/sprites/:key      -> image/png from the local mirror (404 if not mirrored)
@@ -123,6 +126,13 @@ mock data + localStorage:
   it hides only *known* non-matches — a slot with no availability data stays
   visible (unknown, never a guess). Foundation for the living-dex planner
   (HOME-native vs Bank routing) still to come.
+- **To Pokémon HOME** route line (detail sheet) — the simplest legit route into
+  Pokémon HOME across the games a species is available in (`GET /api/transfer`,
+  data in `src/obtainability/transfer.ts`): HOME-native (Switch line + GO), via
+  Pokémon Bank, or via the Gen 3→4→5 transfer chain. Curated + research-verified
+  against official HOME / Bulbapedia sources; anything uncertain is `unknown`,
+  never guessed. Ownership-agnostic for now — the living-dex planner will turn it
+  into "with the games you own" and flag the intermediate games each chain needs.
 
 Replacing it is a drop-in: overwrite `web/public/` and keep speaking the API above.
 Notes: the Google font loads from the internet (system-ui fallback keeps it usable

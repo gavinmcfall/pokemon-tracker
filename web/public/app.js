@@ -58,6 +58,17 @@ const OWNERSHIP_METHODS = [
   { key: 'romhack', label: 'Romhack', short: 'Hack' },
 ];
 
+// How a game's catches reach Pokémon HOME. Rank = simplicity (lower is simpler),
+// used to pick the easiest route among the games a species is available in.
+const REACH = {
+  native: { rank: 0, tag: 'HOME-native', direct: true },
+  go: { rank: 1, tag: 'via GO', direct: true },
+  bank: { rank: 2, tag: 'via Pokémon Bank', direct: false },
+  chain: { rank: 3, tag: 'via transfer chain', direct: false },
+  none: { rank: 8, tag: 'no HOME route', direct: false },
+  unknown: { rank: 9, tag: 'route unknown', direct: false },
+};
+
 const state = {
   loading: true,
   entries: [],
@@ -70,8 +81,22 @@ const state = {
   gameFilter: '',
   games: [],
   ownedGroupIds: new Set(),
+  transfer: {}, // gameId -> TransferInfo (how that game reaches HOME)
   theme: 'auto',
 };
+
+/** The simplest HOME route among the games a species is available in (or null). */
+function bestHomeRoute(e) {
+  if (!hasEnrichment(e)) return null;
+  let best = null;
+  for (const a of e.availability) {
+    const info = state.transfer[a.gameId];
+    if (!info || info.reach === 'none' || info.reach === 'unknown') continue;
+    const rank = (REACH[info.reach] ?? REACH.unknown).rank;
+    if (!best || rank < best.rank) best = { rank, info };
+  }
+  return best ? best.info : null;
+}
 
 // Games are individual releases (Red and Blue are separate); obtainability
 // availability is per version-group. Owning either release lights up its group,
@@ -734,6 +759,26 @@ function renderSheetInto(e, refocusCaught) {
       }, b));
       ob.append(row);
     }
+    // Simplest legit route into Pokémon HOME across the games it's available in
+    // (ownership-agnostic for now — the planner will make it "with games you own").
+    const route = bestHomeRoute(e);
+    if (route) {
+      const meta = REACH[route.reach] ?? REACH.unknown;
+      const accent = meta.direct ? T.owned : T.muted;
+      const box = elem('div', { display: 'flex', flexDirection: 'column', gap: '5px' });
+      box.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, 'TO POKÉMON HOME'));
+      const line = elem('div', { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' });
+      line.append(elem('span', {
+        display: 'inline-flex', alignItems: 'center', minHeight: '26px', padding: '0 10px', borderRadius: '999px',
+        background: `color-mix(in oklab, ${accent} 16%, ${T.raised})`, border: `1px solid ${accent}`,
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', fontWeight: '700', letterSpacing: '0.04em', color: T.text,
+      }, meta.direct ? `✓ ${meta.tag.toUpperCase()}` : meta.tag.toUpperCase()));
+      line.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', color: T.text }, route.route));
+      box.append(line);
+      if (route.note) box.append(elem('span', { fontSize: '11.5px', color: T.muted, lineHeight: '1.4' }, route.note));
+      ob.append(box);
+    }
+
     for (const p of PLATFORM_ORDER) {
       const rows = e.availability.filter((a) => a.platform === p);
       if (!rows.length) continue;
@@ -955,6 +1000,11 @@ async function loadGames() {
   catch { /* ownership is optional chrome; leave it absent on failure */ }
 }
 
+async function loadTransfer() {
+  try { state.transfer = await api('/api/transfer'); }
+  catch { /* transfer topology is optional chrome; the route line stays hidden */ }
+}
+
 /* ---------- filters / gen ---------- */
 function setGen(n) {
   state.gen = n;
@@ -1050,6 +1100,7 @@ function init() {
   el.gamesBtn.addEventListener('click', openGamesModal);
   pollMirror().catch(() => { el.mirrorBtn.hidden = true; });
   loadGames().then(render);
+  loadTransfer().then(() => { if (sheet.key) { const e = state.entries.find((x) => x.entryKey === sheet.key); if (e) renderSheetInto(e, false); } });
 
   state.loading = true;
   el.loading.hidden = false; el.results.hidden = true; el.empty.hidden = true;

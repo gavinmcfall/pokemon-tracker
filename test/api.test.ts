@@ -272,6 +272,16 @@ describe('game ownership', () => {
   });
 });
 
+describe('GET /api/transfer', () => {
+  it('returns the HOME transfer topology keyed by gameId', async () => {
+    const t = await json(await get('/api/transfer'));
+    expect(t.sv).toMatchObject({ gameId: 'sv', reach: 'native', directToHome: true });
+    expect(t.xy).toMatchObject({ reach: 'bank', requiresBank: true });
+    expect(t.e).toMatchObject({ reach: 'chain', requiresBank: true });
+    expect(t.e.requiresGames).toEqual([['dp', 'pt', 'hgss'], ['bw', 'b2w2']]);
+  });
+});
+
 describe('probes', () => {
   it('healthz and readyz respond ok', async () => {
     expect((await get('/healthz')).status).toBe(200);

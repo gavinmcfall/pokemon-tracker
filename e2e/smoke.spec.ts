@@ -195,6 +195,9 @@ test('obtainability: filters appear and the detail sheet shows availability', as
   await expect(obtain).toContainText('OBTAINABILITY');
   await expect(obtain).toContainText("Let's Go");
   await expect(obtain).toContainText('GMAX');
+  // Charizard is available in Let's Go (Switch → HOME-native), so the route line shows it
+  await expect(obtain).toContainText('TO POKÉMON HOME');
+  await expect(obtain).toContainText('HOME-NATIVE');
 });
 
 test('obtainability filter hides known non-matches but keeps entries with unknown data', async ({ page }) => {

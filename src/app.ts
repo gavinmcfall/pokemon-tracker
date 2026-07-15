@@ -3,6 +3,7 @@ import type { Store } from './store/store.js';
 import type { EntryFilters, EntryWithStatus, GameOwnership, GameWithOwnership, SpecimenInput, StatusPatch } from './types.js';
 import { parseOwnershipMethods } from './types.js';
 import { RELEASES, RELEASE_BY_ID } from './obtainability/games.js';
+import { TRANSFER_BY_GAME } from './obtainability/transfer.js';
 import { exportCsv, planImport } from './csv.js';
 import type { SpriteMirror } from './sprites.js';
 
@@ -252,6 +253,12 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
     });
     return c.json(result);
   });
+
+  // Transfer topology: how each game's catches reach Pokémon HOME (native /
+  // via Bank / via the Gen 3→4→5 chain / GO). Static per game-group, keyed by
+  // the same gameId as obtainability availability. Powers the detail sheet's
+  // "to HOME" route line and (later) the living-dex planner.
+  app.get('/api/transfer', (c) => c.json(TRANSFER_BY_GAME));
 
   app.get('/api/export', async (c) => {
     const entries = await store.listEntries({});
