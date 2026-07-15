@@ -78,8 +78,37 @@ export interface SpecimenInput {
   ot?: string | null;
 }
 
-/** Entry as served by GET /api/entries: spec §3 shape plus embedded status + specimen. */
-export type EntryWithStatus = Entry & { status: Status | null; specimen: Specimen | null };
+export interface AvailabilityEntry {
+  gameId: string;
+  label: string;
+  platform: string;
+  method: string;
+  shinyPossible: boolean;
+}
+
+/**
+ * Where/how a slot can be legitimately obtained + shiny/mechanic flags.
+ * Catalogue-derived (recomputed each seed), keyed by entryKey. Consumed by the
+ * front-end's Obtainability zone + filters.
+ */
+export interface Obtainability {
+  availability: AvailabilityEntry[];
+  gmaxCapable: boolean;
+  teraAvailable: boolean;
+  catchableOnSwitch: boolean;
+  shinyLegalSomewhere: boolean;
+  unobtainableLegit: boolean;
+  genderVisualDiff: boolean;
+  shinyLockedIn: string[];
+  originGames: string[];
+}
+
+/** Entry as served by GET /api/entries: spec §3 shape plus embedded status + specimen + obtainability. */
+export type EntryWithStatus = Entry & {
+  status: Status | null;
+  specimen: Specimen | null;
+  obtainability: Obtainability | null;
+};
 
 export interface StatusPatch {
   entryKey: string;

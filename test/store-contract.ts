@@ -167,5 +167,60 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       expect(list.find((e) => e.entryKey === '0006-mega_x-male')!.specimen).toBeNull();
       expect(list.find((e) => e.entryKey === '0666-fancy-female')!.specimen).toMatchObject({ event: true });
     });
+
+    it('replaceObtainability embeds availability + flags, reports unmatched, full-syncs', async () => {
+      const store = await makeStore();
+      await store.upsertEntries(CONTRACT_ENTRIES);
+      const ob = {
+        availability: [{ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true }],
+        gmaxCapable: true, teraAvailable: true, catchableOnSwitch: true, shinyLegalSomewhere: true,
+        unobtainableLegit: false, genderVisualDiff: false, shinyLockedIn: [], originGames: ['sv'],
+      };
+      const res = await store.replaceObtainability([
+        { entryKey: '0006-default-male', obtainability: ob },
+        { entryKey: '9999-nope-male', obtainability: ob },
+      ]);
+      expect(res.upserted).toBe(1);
+      expect(res.unmatched).toEqual(['9999-nope-male']);
+
+      let list = await store.listEntries({});
+      expect(list.find((e) => e.entryKey === '0006-default-male')!.obtainability).toMatchObject({
+        gmaxCapable: true, teraAvailable: true, originGames: ['sv'],
+        availability: [{ gameId: 'sv', method: 'wild', shinyPossible: true }],
+      });
+      expect(list.find((e) => e.entryKey === '0006-mega_x-male')!.obtainability).toBeNull();
+
+      // full-sync: a new payload drops the previous set
+      await store.replaceObtainability([{ entryKey: '0150-default-genderless', obtainability: ob }]);
+      list = await store.listEntries({});
+      expect(list.find((e) => e.entryKey === '0006-default-male')!.obtainability).toBeNull();
+      expect(list.find((e) => e.entryKey === '0150-default-genderless')!.obtainability).not.toBeNull();
+    });
+
+    it('replace* are last-write-wins on a duplicate entryKey (store parity, no throw)', async () => {
+      const store = await makeStore();
+      await store.upsertEntries(CONTRACT_ENTRIES);
+
+      const spec = await store.replaceSpecimens([
+        { entryKey: '0006-mega_x-male', shiny: false },
+        { entryKey: '0006-mega_x-male', shiny: true },
+      ]);
+      expect(spec.upserted).toBe(1);
+      let list = await store.listEntries({});
+      expect(list.find((e) => e.entryKey === '0006-mega_x-male')!.specimen!.shiny).toBe(true);
+
+      const ob = (gmax: boolean) => ({
+        availability: [], gmaxCapable: gmax, teraAvailable: false, catchableOnSwitch: false,
+        shinyLegalSomewhere: true, unobtainableLegit: false, genderVisualDiff: false,
+        shinyLockedIn: [], originGames: [],
+      });
+      const obr = await store.replaceObtainability([
+        { entryKey: '0006-default-male', obtainability: ob(false) },
+        { entryKey: '0006-default-male', obtainability: ob(true) },
+      ]);
+      expect(obr.upserted).toBe(1);
+      list = await store.listEntries({});
+      expect(list.find((e) => e.entryKey === '0006-default-male')!.obtainability!.gmaxCapable).toBe(true);
+    });
   });
 }

@@ -128,9 +128,8 @@ test('detail sheet: opens via ⋯, edits metadata, persists across reload', asyn
   await expect(panel).toBeVisible();
   await expect(panel).toContainText('MY CATCH');
   await expect(panel).toContainText('Mega Charizard X');
-  // no enrichment in the harness → no obtainability section, and filters hidden
-  await expect(page.locator('.sheet-section.obtain')).toHaveCount(0);
-  await expect(page.locator('#obtain-row')).toBeHidden();
+  // the harness now provides obtainability → the sheet shows the zone
+  await expect(page.locator('.sheet-section.obtain')).toHaveCount(1);
 
   await panel.getByLabel('Close details').click(); // reopen fresh below; first fill fields
   await page.locator(`${mega} ~ .tile-info`).click();
@@ -181,6 +180,34 @@ test('specimen: an uncaught entry has no badges and no Best Specimen zone', asyn
   await page.locator(`${charizard} ~ .tile-info`).click();
   await expect(page.locator('.sheet-panel')).toBeVisible();
   await expect(page.locator('.sheet-section.specimen')).toHaveCount(0);
+});
+
+test('obtainability: filters appear and the detail sheet shows availability', async ({ page }) => {
+  // enrichment is present, so the obtain filter row shows
+  await expect(page.locator('#obtain-row')).toBeVisible();
+  await expect(page.locator('#obtain-chips button[data-obtain="gmax"]')).toBeVisible();
+
+  // the Charizard detail sheet shows the Obtainability zone with its game + GMAX badge
+  const cz = `${gridButton}[data-entry-key="0006-default-male"]`;
+  await page.locator(`${cz} ~ .tile-info`).click();
+  const obtain = page.locator('.sheet-section.obtain');
+  await expect(obtain).toBeVisible();
+  await expect(obtain).toContainText('OBTAINABILITY');
+  await expect(obtain).toContainText("Let's Go");
+  await expect(obtain).toContainText('GMAX');
+});
+
+test('obtainability filter hides known non-matches but keeps entries with unknown data', async ({ page }) => {
+  // Gen I harness: Charizard default is Switch-catchable (known true); mega_x is
+  // not (known false); Mewtwo has no obtainability at all (unknown). The Switch
+  // filter must hide the known-false one but keep the unknown one — we never
+  // hide on a guess.
+  await expect(page.locator(gridButton)).toHaveCount(3);
+  await page.locator('#obtain-chips button[data-obtain="switch"]').click();
+  await expect(page.locator(gridButton)).toHaveCount(2);
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-default-male"]`)).toBeVisible();   // known true → kept
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-mega_x-male"]`)).toHaveCount(0);   // known false → hidden
+  await expect(page.locator(`${gridButton}[data-entry-key="0150-default-genderless"]`)).toBeVisible(); // unknown → kept
 });
 
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {

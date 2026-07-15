@@ -2,8 +2,8 @@ import pg from 'pg';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Entry, EntryFilters, EntryWithStatus, Ivs, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
-import { normalizeSpecimen, type SpecimenSyncResult, type Store, type UpsertResult } from './store.js';
+import type { AvailabilityEntry, Entry, EntryFilters, EntryWithStatus, Ivs, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import { normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
 
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
 
@@ -38,6 +38,16 @@ interface EntryRow {
   sp_ribbons: string[] | null;
   sp_nickname: string | null;
   sp_ot: string | null;
+  ob_entry_key: string | null;
+  ob_availability: AvailabilityEntry[] | null;
+  ob_gmax_capable: boolean | null;
+  ob_tera_available: boolean | null;
+  ob_catchable_on_switch: boolean | null;
+  ob_shiny_legal_somewhere: boolean | null;
+  ob_unobtainable_legit: boolean | null;
+  ob_gender_visual_diff: boolean | null;
+  ob_shiny_locked_in: string[] | null;
+  ob_origin_games: string[] | null;
 }
 
 function rowToEntry(row: EntryRow): EntryWithStatus {
@@ -77,6 +87,17 @@ function rowToEntry(row: EntryRow): EntryWithStatus {
       nickname: row.sp_nickname,
       ot: row.sp_ot,
     },
+    obtainability: row.ob_entry_key === null ? null : {
+      availability: row.ob_availability ?? [],
+      gmaxCapable: row.ob_gmax_capable ?? false,
+      teraAvailable: row.ob_tera_available ?? false,
+      catchableOnSwitch: row.ob_catchable_on_switch ?? false,
+      shinyLegalSomewhere: row.ob_shiny_legal_somewhere ?? true,
+      unobtainableLegit: row.ob_unobtainable_legit ?? false,
+      genderVisualDiff: row.ob_gender_visual_diff ?? false,
+      shinyLockedIn: row.ob_shiny_locked_in ?? [],
+      originGames: row.ob_origin_games ?? [],
+    },
   };
 }
 
@@ -89,10 +110,18 @@ const BASE_SELECT = `
          sp.level as sp_level, sp.origin_game as sp_origin_game, sp.met_year as sp_met_year,
          sp.iv_perfect as sp_iv_perfect, sp.ivs as sp_ivs, sp.tera as sp_tera,
          sp.ball as sp_ball, sp.nature as sp_nature, sp.ability as sp_ability,
-         sp.ribbons as sp_ribbons, sp.nickname as sp_nickname, sp.ot as sp_ot
+         sp.ribbons as sp_ribbons, sp.nickname as sp_nickname, sp.ot as sp_ot,
+         ob.entry_key as ob_entry_key, ob.availability as ob_availability,
+         ob.gmax_capable as ob_gmax_capable, ob.tera_available as ob_tera_available,
+         ob.catchable_on_switch as ob_catchable_on_switch,
+         ob.shiny_legal_somewhere as ob_shiny_legal_somewhere,
+         ob.unobtainable_legit as ob_unobtainable_legit,
+         ob.gender_visual_diff as ob_gender_visual_diff,
+         ob.shiny_locked_in as ob_shiny_locked_in, ob.origin_games as ob_origin_games
   from entries e
   left join status s using (entry_key)
   left join specimen sp using (entry_key)
+  left join obtainability ob using (entry_key)
 `;
 
 const ORDER_BY = `
@@ -277,7 +306,7 @@ export class PgStore implements Store {
     };
   }
 
-  async replaceSpecimens(inputs: SpecimenInput[]): Promise<SpecimenSyncResult> {
+  async replaceSpecimens(inputs: SpecimenInput[]): Promise<SyncResult> {
     const client = await this.pool.connect();
     try {
       await client.query('begin');
@@ -293,9 +322,11 @@ export class PgStore implements Store {
       }
       const unmatched = keys.filter((k) => !present.has(k));
 
-      // Full-sync: clear then insert the matched set.
+      // Full-sync: clear then insert the matched set. `on conflict` makes a
+      // duplicate entryKey in the payload last-write-wins (matching MemoryStore)
+      // instead of throwing a primary-key violation.
       await client.query('delete from specimen');
-      let upserted = 0;
+      const seen = new Set<string>();
       for (const input of inputs) {
         if (!present.has(input.entryKey)) continue;
         const s = normalizeSpecimen(input);
@@ -303,15 +334,70 @@ export class PgStore implements Store {
           `insert into specimen
              (entry_key, shiny, event, level, origin_game, met_year, iv_perfect, ivs,
               tera, ball, nature, ability, ribbons, nickname, ot)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           on conflict (entry_key) do update set
+             shiny=excluded.shiny, event=excluded.event, level=excluded.level,
+             origin_game=excluded.origin_game, met_year=excluded.met_year, iv_perfect=excluded.iv_perfect,
+             ivs=excluded.ivs, tera=excluded.tera, ball=excluded.ball, nature=excluded.nature,
+             ability=excluded.ability, ribbons=excluded.ribbons, nickname=excluded.nickname, ot=excluded.ot`,
           [
             s.entryKey, s.shiny, s.event, s.level, s.originGame, s.metYear, s.ivPerfect,
             s.ivs === null ? null : JSON.stringify(s.ivs),
             s.tera, s.ball, s.nature, s.ability, s.ribbons, s.nickname, s.ot,
           ],
         );
-        upserted += 1;
+        seen.add(input.entryKey);
       }
+      await client.query('commit');
+      return { upserted: seen.size, unmatched };
+    } catch (err) {
+      await client.query('rollback');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async replaceObtainability(records: ObtainabilityRecord[]): Promise<SyncResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const keys = records.map((r) => r.entryKey);
+      const present = new Set<string>();
+      if (keys.length > 0) {
+        const res = await client.query<{ entry_key: string }>(
+          'select entry_key from entries where entry_key = any($1)',
+          [keys],
+        );
+        for (const r of res.rows) present.add(r.entry_key);
+      }
+      const unmatched = keys.filter((k) => !present.has(k));
+
+      // `on conflict` makes a duplicate entryKey last-write-wins (matching
+      // MemoryStore) rather than throwing a primary-key violation.
+      await client.query('delete from obtainability');
+      const seen = new Set<string>();
+      for (const { entryKey, obtainability: o } of records) {
+        if (!present.has(entryKey)) continue;
+        await client.query(
+          `insert into obtainability
+             (entry_key, availability, gmax_capable, tera_available, catchable_on_switch,
+              shiny_legal_somewhere, unobtainable_legit, gender_visual_diff, shiny_locked_in, origin_games)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           on conflict (entry_key) do update set
+             availability=excluded.availability, gmax_capable=excluded.gmax_capable,
+             tera_available=excluded.tera_available, catchable_on_switch=excluded.catchable_on_switch,
+             shiny_legal_somewhere=excluded.shiny_legal_somewhere, unobtainable_legit=excluded.unobtainable_legit,
+             gender_visual_diff=excluded.gender_visual_diff, shiny_locked_in=excluded.shiny_locked_in,
+             origin_games=excluded.origin_games`,
+          [
+            entryKey, JSON.stringify(o.availability), o.gmaxCapable, o.teraAvailable, o.catchableOnSwitch,
+            o.shinyLegalSomewhere, o.unobtainableLegit, o.genderVisualDiff, o.shinyLockedIn, o.originGames,
+          ],
+        );
+        seen.add(entryKey);
+      }
+      const upserted = seen.size;
       await client.query('commit');
       return { upserted, unmatched };
     } catch (err) {

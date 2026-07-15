@@ -46,6 +46,7 @@ describe('GET /api/entries', () => {
       isCosmetic: false,
       status: null,
       specimen: null,
+      obtainability: null,
     });
   });
 

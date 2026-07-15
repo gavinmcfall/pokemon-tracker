@@ -47,6 +47,27 @@ async function resetState(): Promise<void> {
       ribbons: ['Classic'], nickname: 'Papillon', ot: 'Serina',
     },
   ]);
+  // Catalogue-derived obtainability (what the seed computes in production), so
+  // the Obtainability filters + detail-sheet zone can be exercised end to end.
+  const ob = (over: Record<string, unknown>) => ({
+    availability: [], gmaxCapable: false, teraAvailable: false, catchableOnSwitch: false,
+    shinyLegalSomewhere: true, unobtainableLegit: false, genderVisualDiff: false,
+    shinyLockedIn: [], originGames: [], ...over,
+  });
+  await store.replaceObtainability([
+    { entryKey: '0006-default-male', obtainability: ob({
+      availability: [{ gameId: 'lgpe', label: "Let's Go", platform: 'switch', method: 'wild', shinyPossible: true }],
+      gmaxCapable: true, catchableOnSwitch: true, originGames: ['rb', 'yellow'],
+    }) },
+    { entryKey: '0006-mega_x-male', obtainability: ob({
+      availability: [{ gameId: 'rb', label: 'Red/Blue', platform: 'gb', method: 'evolve', shinyPossible: true }],
+      gmaxCapable: true, originGames: ['rb', 'yellow'],
+    }) },
+    { entryKey: '0666-fancy-female', obtainability: ob({
+      availability: [{ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true }],
+      teraAvailable: true, catchableOnSwitch: true, originGames: ['xy', 'oras'],
+    }) },
+  ]);
 }
 await resetState();
 

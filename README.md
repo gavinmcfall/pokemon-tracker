@@ -37,10 +37,18 @@ best individual filling a caught slot — `shiny`, `event`, `level`, `originGame
 `metYear`, `ivPerfect`, `ivs`, `tera`, `ball`, `nature`, `ability`, `ribbons[]`,
 `nickname`, `ot`. It's machine-generated from a Pokémon HOME export (regenerated
 each sync via `POST /api/specimens`, a full replace) and kept distinct from
-`status` so the two never clobber each other. `GET /api/entries` embeds both
-`status` and `specimen` (each null when absent). The front-end surfaces it as
-shiny/event/6IV badges on caught tiles and a **Best Specimen** zone in the detail
-sheet (origin, IVs, Tera, ribbons, ball/nature, nickname/OT).
+`status` so the two never clobber each other. `GET /api/entries` embeds
+`status`, `specimen` and `obtainability` (each null when absent). The front-end
+surfaces the specimen as shiny/event/6IV badges on caught tiles and a **Best
+Specimen** zone in the detail sheet (origin, IVs, Tera, ribbons, ball/nature,
+nickname/OT).
+
+A fourth, catalogue-derived **`obtainability`** object per entry says where/how a
+slot is legitimately obtainable — `availability[]` (`{gameId, label, platform,
+method, shinyPossible}`), plus `gmaxCapable`, `teraAvailable`,
+`catchableOnSwitch`, `shinyLegalSomewhere`, `unobtainableLegit`,
+`genderVisualDiff`, `shinyLockedIn[]`, `originGames[]`. It's computed by the seed
+(not owner data) and powers the front-end's Obtainability filters + detail zone.
 
 ### API
 
@@ -96,9 +104,10 @@ mock data + localStorage:
 - **Per-entry detail sheet** (v2) — a `⋯` on each tile (or long-press) opens a
   sheet with a **My Catch** editor (caught toggle + Game / Method / Notes,
   combo-suggested, saving to `POST /api/status`) and an **Obtainability** zone.
-- **Obtainability** filters + zone are driven by *planned* enrichment fields
-  (`availability[]`, `gmaxCapable`, `shinyLockedIn`, …). The API doesn't return
-  them yet, so both stay hidden until it does — the catch editor works today.
+- **Obtainability** filters + zone are driven by the catalogue-derived
+  `obtainability` object (`availability[]`, `gmaxCapable`, `teraAvailable`,
+  `shinyLockedIn`, …) the seed now computes (see **Obtainability** below); they
+  light up automatically wherever the API provides it.
 
 Replacing it is a drop-in: overwrite `web/public/` and keep speaking the API above.
 Notes: the Google font loads from the internet (system-ui fallback keeps it usable
@@ -157,6 +166,30 @@ species/forms automatically (current data: 1025 species → **2675 entries** at
 `full`). The seed never deletes: rows that disappear upstream are logged as
 stale for review. Re-seeding never touches `status` — owner data survives
 refreshes, and a run against unchanged data is a zero-diff no-op.
+
+## Obtainability
+
+The seed also derives a per-slot **obtainability** record (`src/obtainability/`,
+stored in the `obtainability` table, embedded in `GET /api/entries`):
+
+- **Derived from PokéAPI** (accurate, no guessing): `availability[]` from the
+  wild-encounter tables **plus evolution-chain derivation** (a mon is reachable
+  in game X if a pre-evolution is catchable there — so Charizard inherits
+  Charmander's games as `method: "evolve"`); `gmaxCapable` (has a `-gmax`
+  variety), `genderVisualDiff` (`has_gender_differences`), `catchableOnSwitch`,
+  `teraAvailable` (obtainable in Scarlet/Violet), `originGames` (debut
+  generation's games).
+- **Curated overlay** (`src/obtainability/curated.ts`) for the finite facts
+  PokéAPI can't provide: static/gift availability for legendaries with no wild
+  tables, per-game shiny locks (gen 6–9 starters + box legendaries), and
+  shiny-locked-everywhere species. A spot-checkable, extensible v1 — defaults
+  are conservative (shiny is legal unless a curated entry says otherwise), so a
+  gap under-claims rather than misleads.
+
+Version→game rollup and platform grouping live in `src/obtainability/games.ts`.
+Known v1 limits (documented, not fabricated): obtainability is species-level
+(regional-form exclusivity isn't split out yet), and pure static/event mons
+outside the curated set show sparse availability rather than wrong data.
 
 ## Run locally
 
