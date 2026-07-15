@@ -211,16 +211,17 @@ test('obtainability filter hides known non-matches but keeps entries with unknow
 });
 
 test('My Games: owning a game marks its availability and enables the "owned" filter', async ({ page }) => {
-  // Charizard (default) is obtainable in Let's Go (lgpe); mega_x only in Red/Blue
-  // (rb); Mewtwo has no obtainability. Owning lgpe should flag Charizard's chip,
-  // reveal the "In a game I own" filter, and (with the filter on) keep Charizard
-  // + the unknown Mewtwo while hiding the known-non-match mega_x.
+  // Charizard (default) is obtainable in Let's Go (version-group lgpe); mega_x
+  // only in Red/Blue (rb); Mewtwo has no obtainability. Owning the Let's Go
+  // Pikachu release (versionGroup lgpe) should flag Charizard's chip, reveal the
+  // "In a game I own" filter, and (with the filter on) keep Charizard + the
+  // unknown Mewtwo while hiding the known-non-match mega_x.
   await page.locator('#games-btn').click();
   const modal = page.locator('.games-panel');
   await expect(modal).toBeVisible();
 
-  await modal.locator('button[data-game-id="lgpe"][data-method="cartridge"]').click();
-  await expect(modal.locator('button[data-game-id="lgpe"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
+  await modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]').click();
+  await expect(modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
   await expect(modal).toHaveCount(0);
 
@@ -235,7 +236,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
 
   // the owned filter keeps known-match + unknown, hides the known non-match
   await ownedFilter.click();
-  await expect(page.locator(`${gridButton}[data-entry-key="0006-default-male"]`)).toBeVisible();       // owned lgpe → kept
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-default-male"]`)).toBeVisible();       // owned lets-go → kept
   await expect(page.locator(`${gridButton}[data-entry-key="0006-mega_x-male"]`)).toHaveCount(0);        // only rb → hidden
   await expect(page.locator(`${gridButton}[data-entry-key="0150-default-genderless"]`)).toBeVisible();  // unknown → kept
 
@@ -243,7 +244,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   await page.reload();
   await expect(page.locator(gridButton).first()).toBeVisible();
   await page.locator('#games-btn').click();
-  await expect(page.locator('.games-panel button[data-game-id="lgpe"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.games-panel button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {

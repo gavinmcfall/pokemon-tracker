@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Store } from './store/store.js';
 import type { EntryFilters, EntryWithStatus, GameOwnership, GameWithOwnership, SpecimenInput, StatusPatch } from './types.js';
 import { parseOwnershipMethods } from './types.js';
-import { GAMES, GAME_BY_ID } from './obtainability/games.js';
+import { RELEASES, RELEASE_BY_ID } from './obtainability/games.js';
 import { exportCsv, planImport } from './csv.js';
 import type { SpriteMirror } from './sprites.js';
 
@@ -202,19 +202,21 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
   });
 
   // ---- Game ownership -------------------------------------------------------
-  // The canonical GAMES catalogue merged with the owner's ownership (which
-  // games they have, and how). One call gives the front-end everything for the
-  // "My Games" screen and the "in a game you own" obtainability signal.
+  // The individual-release catalogue (Red and Blue are separate cartridges)
+  // merged with the owner's ownership. One call gives the front-end everything
+  // for the "My Games" screen and the "in a game you own" obtainability signal
+  // (via each release's versionGroup).
   app.get('/api/games', async (c) => {
     const owned = new Map<string, GameOwnership>();
     for (const o of await store.listGameOwnership()) owned.set(o.gameId, o);
-    const games: GameWithOwnership[] = GAMES.map((g) => {
-      const o = owned.get(g.gameId);
+    const games: GameWithOwnership[] = RELEASES.map((r) => {
+      const o = owned.get(r.releaseId);
       return {
-        gameId: g.gameId,
-        label: g.label,
-        platform: g.platform,
-        generation: g.generation,
+        gameId: r.releaseId,
+        label: r.label,
+        platform: r.platform,
+        generation: r.generation,
+        versionGroup: r.versionGroup,
         owned: Boolean(o && o.methods.length > 0),
         methods: o?.methods ?? [],
         notes: o?.notes ?? null,
@@ -224,7 +226,7 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
   });
 
   // Upsert one game's ownership. Body: { gameId, methods: [...], notes? }.
-  // An empty methods set with no notes clears the game.
+  // gameId is a release slug (e.g. 'red'). Empty methods + no notes clears it.
   app.post('/api/ownership', async (c) => {
     let body: unknown;
     try {
@@ -235,7 +237,7 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
     if (typeof body !== 'object' || body === null) return badRequest('body must be an object');
     const b = body as Record<string, unknown>;
     if (typeof b.gameId !== 'string' || b.gameId === '') return badRequest('gameId is required');
-    if (!GAME_BY_ID.has(b.gameId)) return c.json({ error: `unknown gameId "${b.gameId}"` }, 404);
+    if (!RELEASE_BY_ID.has(b.gameId)) return c.json({ error: `unknown gameId "${b.gameId}"` }, 404);
 
     const methods = parseOwnershipMethods(b.methods ?? []);
     if ('error' in methods) return badRequest(methods.error);

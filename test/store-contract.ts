@@ -227,37 +227,37 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       const store = await makeStore();
       expect(await store.listGameOwnership()).toEqual([]);
 
-      const set = await store.setGameOwnership({ gameId: 'sv', methods: ['romhack', 'cartridge'], notes: 'day-one' });
+      const set = await store.setGameOwnership({ gameId: 'scarlet', methods: ['romhack', 'cartridge'], notes: 'day-one' });
       // methods come back in canonical order regardless of input order
-      expect(set).toMatchObject({ gameId: 'sv', methods: ['cartridge', 'romhack'], notes: 'day-one' });
+      expect(set).toMatchObject({ gameId: 'scarlet', methods: ['cartridge', 'romhack'], notes: 'day-one' });
       expect(set.updatedAt).toBeTruthy();
 
       const list = await store.listGameOwnership();
       expect(list).toHaveLength(1);
-      expect(list[0]).toMatchObject({ gameId: 'sv', methods: ['cartridge', 'romhack'], notes: 'day-one' });
+      expect(list[0]).toMatchObject({ gameId: 'scarlet', methods: ['cartridge', 'romhack'], notes: 'day-one' });
 
       // updating replaces the method set (not merge) and can clear notes
-      const updated = await store.setGameOwnership({ gameId: 'sv', methods: ['emulator'], notes: null });
-      expect(updated).toMatchObject({ gameId: 'sv', methods: ['emulator'], notes: null });
+      const updated = await store.setGameOwnership({ gameId: 'scarlet', methods: ['emulator'], notes: null });
+      expect(updated).toMatchObject({ gameId: 'scarlet', methods: ['emulator'], notes: null });
       expect((await store.listGameOwnership())[0]!.methods).toEqual(['emulator']);
     });
 
     it('game ownership: empty methods with no notes clears the game', async () => {
       const store = await makeStore();
-      await store.setGameOwnership({ gameId: 'frlg', methods: ['emulator'] });
-      await store.setGameOwnership({ gameId: 'swsh', methods: ['cartridge'] });
-      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['frlg', 'swsh']);
+      await store.setGameOwnership({ gameId: 'firered', methods: ['emulator'] });
+      await store.setGameOwnership({ gameId: 'sword', methods: ['cartridge'] });
+      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['firered', 'sword']);
 
-      const cleared = await store.setGameOwnership({ gameId: 'frlg', methods: [] });
-      expect(cleared).toMatchObject({ gameId: 'frlg', methods: [], notes: null });
-      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['swsh']);
+      const cleared = await store.setGameOwnership({ gameId: 'firered', methods: [] });
+      expect(cleared).toMatchObject({ gameId: 'firered', methods: [], notes: null });
+      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['sword']);
     });
 
     it('game ownership: a note alone (no methods) is retained', async () => {
       const store = await makeStore();
-      const kept = await store.setGameOwnership({ gameId: 'pla', methods: [], notes: 'borrowed from a friend' });
-      expect(kept).toMatchObject({ gameId: 'pla', methods: [], notes: 'borrowed from a friend' });
-      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['pla']);
+      const kept = await store.setGameOwnership({ gameId: 'legends-arceus', methods: [], notes: 'borrowed from a friend' });
+      expect(kept).toMatchObject({ gameId: 'legends-arceus', methods: [], notes: 'borrowed from a friend' });
+      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['legends-arceus']);
     });
   });
 }

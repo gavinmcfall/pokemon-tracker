@@ -79,6 +79,67 @@ export const VERSION_GROUP_TO_GAME: Record<string, string> = {
   'scarlet-violet': 'sv', 'the-teal-mask': 'sv', 'the-indigo-disk': 'sv',
 };
 
+/**
+ * Individual games the owner can actually possess — a *release*, one physical
+ * cartridge / cart-image per row. Paired versions (Red **and** Blue) are listed
+ * separately because you own one cartridge, not the pair. Each release maps to
+ * its obtainability `versionGroup` (a GAMES `gameId`): dex availability is
+ * genuinely per-group (a species in Red is in Blue too), so owning either
+ * release lights up that group's availability. Ownership is tracked here; the
+ * obtainability layer above stays at version-group granularity.
+ */
+export interface ReleaseMeta {
+  releaseId: string; // PokéAPI version slug (e.g. 'red', 'lets-go-pikachu')
+  label: string;
+  platform: Platform;
+  generation: number;
+  versionGroup: string; // the GAMES gameId this release belongs to
+}
+
+/** Every individually-ownable release, in release order (drives the "My Games" list). */
+export const RELEASES: ReleaseMeta[] = [
+  { releaseId: 'red', label: 'Red', platform: 'gb', generation: 1, versionGroup: 'rb' },
+  { releaseId: 'blue', label: 'Blue', platform: 'gb', generation: 1, versionGroup: 'rb' },
+  { releaseId: 'yellow', label: 'Yellow', platform: 'gb', generation: 1, versionGroup: 'yellow' },
+  { releaseId: 'gold', label: 'Gold', platform: 'gbc', generation: 2, versionGroup: 'gs' },
+  { releaseId: 'silver', label: 'Silver', platform: 'gbc', generation: 2, versionGroup: 'gs' },
+  { releaseId: 'crystal', label: 'Crystal', platform: 'gbc', generation: 2, versionGroup: 'c' },
+  { releaseId: 'ruby', label: 'Ruby', platform: 'gba', generation: 3, versionGroup: 'rs' },
+  { releaseId: 'sapphire', label: 'Sapphire', platform: 'gba', generation: 3, versionGroup: 'rs' },
+  { releaseId: 'emerald', label: 'Emerald', platform: 'gba', generation: 3, versionGroup: 'e' },
+  { releaseId: 'firered', label: 'FireRed', platform: 'gba', generation: 3, versionGroup: 'frlg' },
+  { releaseId: 'leafgreen', label: 'LeafGreen', platform: 'gba', generation: 3, versionGroup: 'frlg' },
+  { releaseId: 'diamond', label: 'Diamond', platform: 'ds', generation: 4, versionGroup: 'dp' },
+  { releaseId: 'pearl', label: 'Pearl', platform: 'ds', generation: 4, versionGroup: 'dp' },
+  { releaseId: 'platinum', label: 'Platinum', platform: 'ds', generation: 4, versionGroup: 'pt' },
+  { releaseId: 'heartgold', label: 'HeartGold', platform: 'ds', generation: 4, versionGroup: 'hgss' },
+  { releaseId: 'soulsilver', label: 'SoulSilver', platform: 'ds', generation: 4, versionGroup: 'hgss' },
+  { releaseId: 'black', label: 'Black', platform: 'ds', generation: 5, versionGroup: 'bw' },
+  { releaseId: 'white', label: 'White', platform: 'ds', generation: 5, versionGroup: 'bw' },
+  { releaseId: 'black-2', label: 'Black 2', platform: 'ds', generation: 5, versionGroup: 'b2w2' },
+  { releaseId: 'white-2', label: 'White 2', platform: 'ds', generation: 5, versionGroup: 'b2w2' },
+  { releaseId: 'x', label: 'X', platform: '3ds', generation: 6, versionGroup: 'xy' },
+  { releaseId: 'y', label: 'Y', platform: '3ds', generation: 6, versionGroup: 'xy' },
+  { releaseId: 'omega-ruby', label: 'Omega Ruby', platform: '3ds', generation: 6, versionGroup: 'oras' },
+  { releaseId: 'alpha-sapphire', label: 'Alpha Sapphire', platform: '3ds', generation: 6, versionGroup: 'oras' },
+  { releaseId: 'sun', label: 'Sun', platform: '3ds', generation: 7, versionGroup: 'sm' },
+  { releaseId: 'moon', label: 'Moon', platform: '3ds', generation: 7, versionGroup: 'sm' },
+  { releaseId: 'ultra-sun', label: 'Ultra Sun', platform: '3ds', generation: 7, versionGroup: 'usum' },
+  { releaseId: 'ultra-moon', label: 'Ultra Moon', platform: '3ds', generation: 7, versionGroup: 'usum' },
+  { releaseId: 'lets-go-pikachu', label: "Let's Go Pikachu", platform: 'switch', generation: 7, versionGroup: 'lgpe' },
+  { releaseId: 'lets-go-eevee', label: "Let's Go Eevee", platform: 'switch', generation: 7, versionGroup: 'lgpe' },
+  { releaseId: 'sword', label: 'Sword', platform: 'switch', generation: 8, versionGroup: 'swsh' },
+  { releaseId: 'shield', label: 'Shield', platform: 'switch', generation: 8, versionGroup: 'swsh' },
+  { releaseId: 'brilliant-diamond', label: 'Brilliant Diamond', platform: 'switch', generation: 8, versionGroup: 'bdsp' },
+  { releaseId: 'shining-pearl', label: 'Shining Pearl', platform: 'switch', generation: 8, versionGroup: 'bdsp' },
+  { releaseId: 'legends-arceus', label: 'Legends: Arceus', platform: 'switch', generation: 8, versionGroup: 'pla' },
+  { releaseId: 'scarlet', label: 'Scarlet', platform: 'switch', generation: 9, versionGroup: 'sv' },
+  { releaseId: 'violet', label: 'Violet', platform: 'switch', generation: 9, versionGroup: 'sv' },
+  { releaseId: 'go', label: 'Pokémon GO', platform: 'mobile', generation: 0, versionGroup: 'go' },
+];
+
+export const RELEASE_BY_ID = new Map(RELEASES.map((r) => [r.releaseId, r]));
+
 const GAME_ORDER = new Map(GAMES.map((g, i) => [g.gameId, i]));
 
 /** Sort gameIds by release order. */
