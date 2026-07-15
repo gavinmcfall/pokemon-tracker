@@ -45,10 +45,18 @@ const T = {
   red: LD('#E3350D', '#F4503B'),
   gray: LD('#C6CDD5', '#3A4450'),
   gold: LD('#B8860B', '#F7D02C'),
+  owned: LD('#1B9E52', '#3FD07E'),
 };
 
 const THEME_KEY = 'livingdex-theme';
 const GEN_KEY = 'livingdex-gen';
+
+// Ownership methods, in the same canonical order the API uses.
+const OWNERSHIP_METHODS = [
+  { key: 'cartridge', label: 'Cartridge', short: 'Cart' },
+  { key: 'emulator', label: 'Emulator', short: 'Emu' },
+  { key: 'romhack', label: 'Romhack', short: 'Hack' },
+];
 
 const state = {
   loading: true,
@@ -58,10 +66,17 @@ const state = {
   status: 'all',
   query: '',
   types: [],
-  obtain: { switch: false, shiny: false, gmax: false, tera: false },
+  obtain: { owned: false, switch: false, shiny: false, gmax: false, tera: false },
   gameFilter: '',
+  games: [],
+  ownedGameIds: new Set(),
   theme: 'auto',
 };
+
+function setGamesState(games) {
+  state.games = games;
+  state.ownedGameIds = new Set(games.filter((g) => g.owned).map((g) => g.gameId));
+}
 
 const el = {};
 const $ = (id) => document.getElementById(id);
@@ -181,6 +196,10 @@ function matchesFilters(e) {
   // (the entry has obtainability data). Entries with no data yet are "unknown"
   // and are kept rather than silently hidden — we never assert a guess.
   if (hasEnrichment(e)) {
+    // "Owned" hides only entries we KNOW aren't in a game you own; entries with
+    // no availability data stay visible (unknown, never a guess) — same rule as
+    // the other obtainability filters below.
+    if (ob.owned && state.ownedGameIds.size > 0 && !e.availability.some((a) => state.ownedGameIds.has(a.gameId))) return false;
     if (ob.switch && !e.catchableOnSwitch) return false;
     if (ob.shiny && !e.shinyLegalSomewhere) return false;
     if (ob.gmax && !e.gmaxCapable) return false;
@@ -307,15 +326,19 @@ function renderObtain() {
   el.obtainRow.hidden = !present;
   if (!present) return;
   const defs = [
+    // "In a game you own" only appears once at least one game is owned — an
+    // otherwise-dead filter is more confusing than absent.
+    ...(state.ownedGameIds.size > 0 ? [{ key: 'owned', label: 'In a game I own', accent: T.owned }] : []),
     { key: 'switch', label: 'Switch' }, { key: 'shiny', label: 'Shiny-legal' },
     { key: 'gmax', label: 'GMax' }, { key: 'tera', label: 'Tera' },
   ];
   el.obtainChips.replaceChildren();
   for (const o of defs) {
     const sel = state.obtain[o.key];
+    const on = o.accent ?? T.text;
     const btn = elem('button', {
       ...chipBase(), minHeight: '38px', fontSize: '12.5px',
-      background: sel ? T.text : T.card, border: `1.5px solid ${sel ? T.text : T.border}`,
+      background: sel ? on : T.card, border: `1.5px solid ${sel ? on : T.border}`,
       color: sel ? T.page : T.muted,
     }, o.label);
     btn.type = 'button'; btn.dataset.obtain = o.key;
@@ -717,17 +740,20 @@ function renderSheetInto(e, refocusCaught) {
       for (const a of rows) {
         const locked = (e.shinyLockedIn || []).includes(a.gameId);
         const origin = (e.originGames || []).includes(a.gameId);
+        const owned = state.ownedGameIds.has(a.gameId);
         const chip = elem('span', {
           display: 'inline-flex', alignItems: 'center', gap: '7px', minHeight: '34px', padding: '0 12px', borderRadius: '999px',
-          background: T.raised, border: `1px solid ${origin ? `color-mix(in oklab, ${c1} 55%, ${T.border})` : T.border}`,
+          background: owned ? `color-mix(in oklab, ${T.owned} 12%, ${T.raised})` : T.raised,
+          border: `1px solid ${owned ? T.owned : origin ? `color-mix(in oklab, ${c1} 55%, ${T.border})` : T.border}`,
           fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', color: T.text,
         });
-        chip.title = `${a.label} · ${a.method}` + (locked ? ' · shiny-locked' : a.shinyPossible ? ' · shiny possible' : ' · no shinies') + (origin ? ' · origin game' : '');
+        chip.title = `${a.label} · ${a.method}` + (locked ? ' · shiny-locked' : a.shinyPossible ? ' · shiny possible' : ' · no shinies') + (origin ? ' · origin game' : '') + (owned ? ' · in a game you own' : '');
         chip.append(elem('span', { fontWeight: '700' }, a.label), elem('span', { opacity: '0.75' }, a.method));
         chip.append(elem('span', {
           color: (a.shinyPossible && !locked) ? `color-mix(in oklab, ${c1} 70%, ${T.text})` : T.muted,
           textDecoration: locked ? 'line-through' : 'none', opacity: (!a.shinyPossible && !locked) ? '0.35' : '1', fontSize: '13px',
         }, '✦'));
+        if (owned) chip.append(elem('span', { fontSize: '9.5px', fontWeight: '700', letterSpacing: '0.06em', color: T.owned }, '✓ OWNED'));
         if (origin) chip.append(elem('span', { fontSize: '9.5px', fontWeight: '700', letterSpacing: '0.06em', color: T.muted }, 'ORIGIN'));
         chips.append(chip);
       }
@@ -751,6 +777,179 @@ function comboField(label, listId, suggestions, value, placeholder, onSave) {
   for (const s of suggestions) { const o = document.createElement('option'); o.value = s; dl.append(o); }
   wrap.append(input, dl);
   return wrap;
+}
+
+/* ---------- My Games (ownership) ---------- */
+const gamesModal = { scrim: null, panel: null, lastFocus: null, onKey: null };
+
+function gameById(gameId) { return state.games.find((g) => g.gameId === gameId); }
+
+async function saveOwnership(gameId, methods, notes) {
+  const g = gameById(gameId);
+  if (!g) return;
+  const prev = { owned: g.owned, methods: [...g.methods], notes: g.notes };
+  // optimistic
+  g.methods = methods; g.notes = notes ?? null; g.owned = methods.length > 0;
+  setGamesState(state.games);
+  if (gamesModal.panel) renderGamesInto();
+  render(); // refresh the "In a game I own" chip + owned markers
+
+  try {
+    const saved = await api('/api/ownership', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ gameId, methods, notes: notes ?? null }),
+    });
+    g.methods = saved.methods; g.notes = saved.notes; g.owned = saved.methods.length > 0;
+    setGamesState(state.games);
+    if (gamesModal.panel) renderGamesInto();
+    render();
+  } catch (err) {
+    Object.assign(g, prev);
+    setGamesState(state.games);
+    if (gamesModal.panel) renderGamesInto();
+    render();
+    toast(`Couldn't save ${gameLabel(gameId) ?? gameId}: ${err.message}`, true);
+  }
+}
+
+function ownershipRow(g) {
+  const owned = g.methods.length > 0;
+  const row = elem('div', {
+    display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px',
+    borderRadius: '12px', background: T.raised,
+    border: `1px solid ${owned ? T.owned : T.border}`,
+  });
+  row.className = 'game-row'; row.dataset.gameId = g.gameId;
+
+  const top = elem('div', { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' });
+  const name = elem('span', { display: 'flex', flexDirection: 'column', gap: '1px', minWidth: '0', flex: '1' });
+  name.append(elem('span', { fontSize: '14px', fontWeight: '700', color: T.text }, g.label));
+  name.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', letterSpacing: '0.06em', color: T.muted },
+    `${g.gameId.toUpperCase()}${g.generation ? ` · GEN ${ROMAN[g.generation - 1] ?? g.generation}` : ''}`));
+  top.append(name);
+
+  const toggles = elem('div', { display: 'flex', gap: '5px', flexWrap: 'wrap' });
+  for (const m of OWNERSHIP_METHODS) {
+    const on = g.methods.includes(m.key);
+    const btn = elem('button', {
+      ...chipBase(), minHeight: '36px', padding: '0 12px', fontSize: '12px',
+      background: on ? T.owned : T.card, border: `1.5px solid ${on ? T.owned : T.border}`,
+      color: on ? T.page : T.muted,
+    }, m.short);
+    btn.type = 'button'; btn.setAttribute('aria-pressed', String(on));
+    btn.dataset.gameId = g.gameId; btn.dataset.method = m.key;
+    btn.title = `${g.label} — ${m.label}: ${on ? 'owned' : 'not owned'}`;
+    btn.setAttribute('aria-label', `${g.label} ${m.label}`);
+    btn.addEventListener('click', () => {
+      const next = on ? g.methods.filter((x) => x !== m.key) : OWNERSHIP_METHODS.map((x) => x.key).filter((k) => k === m.key || g.methods.includes(k));
+      saveOwnership(g.gameId, next, g.notes);
+    });
+    toggles.append(btn);
+  }
+  top.append(toggles);
+  row.append(top);
+
+  // Notes appear only for a game you actually have (or already annotated).
+  if (owned || (g.notes && g.notes.length)) {
+    const notes = document.createElement('input');
+    notes.type = 'text'; notes.value = g.notes ?? '';
+    notes.placeholder = 'note — e.g. cart is JP, or which romhack';
+    applyStyles(notes, {
+      minHeight: '40px', padding: '0 12px', borderRadius: '10px',
+      border: `1.5px solid ${T.border}`, background: T.card, color: T.text,
+      fontFamily: "'Atkinson Hyperlegible', system-ui, sans-serif", fontSize: '13.5px', width: '100%',
+    });
+    notes.addEventListener('change', () => saveOwnership(g.gameId, g.methods, notes.value));
+    row.append(notes);
+  }
+  return row;
+}
+
+function renderGamesInto() {
+  const panel = gamesModal.panel;
+  panel.replaceChildren();
+
+  // Sticky header so the ✕ stays reachable while the (long) games list scrolls —
+  // matters most on the mobile bottom-sheet.
+  const head = elem('div', { position: 'sticky', top: '0', zIndex: '1', background: T.card });
+  head.className = 'sheet-head';
+  const title = elem('div', null); title.className = 'sheet-title';
+  const ownedCount = state.games.filter((g) => g.owned).length;
+  title.append(elem('span', { fontSize: '19px', fontWeight: '700' }, 'My Games'));
+  title.append(elem('span', { fontSize: '13px', color: T.muted },
+    `${ownedCount} of ${state.games.length} owned · cartridge, emulator or romhack`));
+  const close = elem('button', null, '✕'); close.type = 'button'; close.className = 'sheet-close';
+  close.setAttribute('aria-label', 'Close My Games');
+  close.addEventListener('click', closeGamesModal);
+  head.append(title, close);
+  panel.append(head);
+
+  const body = elem('div', { padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '18px' });
+  for (const p of PLATFORM_ORDER) {
+    const games = state.games.filter((g) => g.platform === p);
+    if (!games.length) continue;
+    const group = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
+    group.append(elem('span', {
+      fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600',
+      letterSpacing: '0.12em', color: T.muted,
+    }, PLATFORM_LABELS[p] ?? p.toUpperCase()));
+    for (const g of games) group.append(ownershipRow(g));
+    body.append(group);
+  }
+  panel.append(body);
+}
+
+function openGamesModal() {
+  if (gamesModal.panel) return;
+  gamesModal.lastFocus = document.activeElement;
+  const narrow = window.innerWidth < 640;
+  gamesModal.scrim = elem('div', { alignItems: narrow ? 'flex-end' : 'center', padding: narrow ? '0' : '24px' });
+  gamesModal.scrim.className = 'sheet-scrim';
+  gamesModal.panel = elem('div', {
+    width: narrow ? '100%' : 'min(560px, 92vw)',
+    maxHeight: narrow ? '88vh' : '86vh',
+    borderRadius: narrow ? '18px 18px 0 0' : '18px',
+    fontFamily: "'Atkinson Hyperlegible', system-ui, sans-serif",
+  });
+  gamesModal.panel.className = 'sheet-panel games-panel';
+  gamesModal.panel.setAttribute('role', 'dialog');
+  gamesModal.panel.setAttribute('aria-modal', 'true');
+  gamesModal.panel.setAttribute('aria-label', 'My Games — track which games you own');
+
+  renderGamesInto();
+  gamesModal.scrim.append(gamesModal.panel);
+  document.body.append(gamesModal.scrim);
+  document.body.style.overflow = 'hidden';
+
+  gamesModal.scrim.addEventListener('click', (ev) => { if (ev.target === gamesModal.scrim) closeGamesModal(); });
+  gamesModal.panel.addEventListener('keydown', trapGamesTab);
+  gamesModal.onKey = (ev) => { if (ev.key === 'Escape') closeGamesModal(); };
+  document.addEventListener('keydown', gamesModal.onKey);
+  setTimeout(() => { const f = gamesModal.panel.querySelector('button, input'); if (f) f.focus(); }, 30);
+}
+
+function closeGamesModal() {
+  if (!gamesModal.panel) return;
+  document.removeEventListener('keydown', gamesModal.onKey);
+  gamesModal.scrim.remove();
+  document.body.style.overflow = '';
+  const restore = gamesModal.lastFocus;
+  gamesModal.scrim = gamesModal.panel = gamesModal.lastFocus = gamesModal.onKey = null;
+  if (restore && restore.focus) setTimeout(() => restore.focus(), 20);
+}
+
+function trapGamesTab(ev) {
+  if (ev.key !== 'Tab' || !gamesModal.panel) return;
+  const f = [...gamesModal.panel.querySelectorAll('button, input, [tabindex]')].filter((x) => !x.disabled && x.tabIndex !== -1);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+  else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+}
+
+async function loadGames() {
+  try { setGamesState(await api('/api/games')); }
+  catch { /* ownership is optional chrome; leave it absent on failure */ }
 }
 
 /* ---------- filters / gen ---------- */
@@ -820,6 +1019,7 @@ function init() {
     loading: $('loading'), skeleton: $('skeleton'), empty: $('empty'), emptyTitle: $('empty-title'),
     emptyBody: $('empty-body'), emptyAction: $('empty-action'), results: $('results'), resultLabel: $('result-label'),
     grid: $('grid'), importFile: $('import-file'), toast: $('toast'), mirrorBtn: $('mirror-btn'),
+    gamesBtn: $('games-btn'),
   });
 
   try {
@@ -836,7 +1036,7 @@ function init() {
 
   el.themeBtn.addEventListener('click', cycleTheme);
   el.emptyAction.addEventListener('click', () => {
-    state.status = 'all'; state.query = ''; state.types = []; state.obtain = { switch: false, shiny: false, gmax: false, tera: false };
+    state.status = 'all'; state.query = ''; state.types = []; state.obtain = { owned: false, switch: false, shiny: false, gmax: false, tera: false };
     state.gameFilter = ''; el.search.value = ''; render();
   });
   let searchTimer;
@@ -844,7 +1044,9 @@ function init() {
   el.gameSelect.addEventListener('change', () => { state.gameFilter = el.gameSelect.value; render(); });
   el.importFile.addEventListener('change', () => { const f = el.importFile.files && el.importFile.files[0]; if (f) onImport(f); el.importFile.value = ''; });
   el.mirrorBtn.addEventListener('click', mirrorSprites);
+  el.gamesBtn.addEventListener('click', openGamesModal);
   pollMirror().catch(() => { el.mirrorBtn.hidden = true; });
+  loadGames().then(render);
 
   state.loading = true;
   el.loading.hidden = false; el.results.hidden = true; el.empty.hidden = true;

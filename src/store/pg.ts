@@ -2,8 +2,8 @@ import pg from 'pg';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AvailabilityEntry, Entry, EntryFilters, EntryWithStatus, Ivs, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
-import { normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
+import type { AvailabilityEntry, Entry, EntryFilters, EntryWithStatus, GameOwnership, GameOwnershipPatch, Ivs, OwnershipMethod, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import { isEmptyOwnership, normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
 
 const MIGRATIONS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'migrations');
 
@@ -99,6 +99,17 @@ function rowToEntry(row: EntryRow): EntryWithStatus {
       originGames: row.ob_origin_games ?? [],
     },
   };
+}
+
+function rowToOwnership(row: {
+  game_id: string; cartridge: boolean; emulator: boolean; romhack: boolean;
+  notes: string | null; updated_at: Date;
+}): GameOwnership {
+  const methods: OwnershipMethod[] = [];
+  if (row.cartridge) methods.push('cartridge');
+  if (row.emulator) methods.push('emulator');
+  if (row.romhack) methods.push('romhack');
+  return { gameId: row.game_id, methods, notes: row.notes, updatedAt: row.updated_at.toISOString() };
 }
 
 const BASE_SELECT = `
@@ -406,6 +417,35 @@ export class PgStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  async listGameOwnership(): Promise<GameOwnership[]> {
+    const res = await this.pool.query<{
+      game_id: string; cartridge: boolean; emulator: boolean; romhack: boolean;
+      notes: string | null; updated_at: Date;
+    }>('select game_id, cartridge, emulator, romhack, notes, updated_at from game_ownership order by game_id');
+    return res.rows.map(rowToOwnership);
+  }
+
+  async setGameOwnership(patch: GameOwnershipPatch): Promise<GameOwnership> {
+    if (isEmptyOwnership(patch)) {
+      await this.pool.query('delete from game_ownership where game_id = $1', [patch.gameId]);
+      return { gameId: patch.gameId, methods: [], notes: null, updatedAt: new Date().toISOString() };
+    }
+    const has = (m: OwnershipMethod) => patch.methods.includes(m);
+    const res = await this.pool.query<{
+      game_id: string; cartridge: boolean; emulator: boolean; romhack: boolean;
+      notes: string | null; updated_at: Date;
+    }>(
+      `insert into game_ownership (game_id, cartridge, emulator, romhack, notes)
+       values ($1, $2, $3, $4, $5)
+       on conflict (game_id) do update set
+         cartridge = excluded.cartridge, emulator = excluded.emulator, romhack = excluded.romhack,
+         notes = excluded.notes, updated_at = now()
+       returning game_id, cartridge, emulator, romhack, notes, updated_at`,
+      [patch.gameId, has('cartridge'), has('emulator'), has('romhack'), patch.notes ?? null],
+    );
+    return rowToOwnership(res.rows[0]!);
   }
 
   async ready(): Promise<void> {

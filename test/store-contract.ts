@@ -222,5 +222,42 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       list = await store.listEntries({});
       expect(list.find((e) => e.entryKey === '0006-default-male')!.obtainability!.gmaxCapable).toBe(true);
     });
+
+    it('game ownership: upsert stores methods+notes, canonical order, updatable', async () => {
+      const store = await makeStore();
+      expect(await store.listGameOwnership()).toEqual([]);
+
+      const set = await store.setGameOwnership({ gameId: 'sv', methods: ['romhack', 'cartridge'], notes: 'day-one' });
+      // methods come back in canonical order regardless of input order
+      expect(set).toMatchObject({ gameId: 'sv', methods: ['cartridge', 'romhack'], notes: 'day-one' });
+      expect(set.updatedAt).toBeTruthy();
+
+      const list = await store.listGameOwnership();
+      expect(list).toHaveLength(1);
+      expect(list[0]).toMatchObject({ gameId: 'sv', methods: ['cartridge', 'romhack'], notes: 'day-one' });
+
+      // updating replaces the method set (not merge) and can clear notes
+      const updated = await store.setGameOwnership({ gameId: 'sv', methods: ['emulator'], notes: null });
+      expect(updated).toMatchObject({ gameId: 'sv', methods: ['emulator'], notes: null });
+      expect((await store.listGameOwnership())[0]!.methods).toEqual(['emulator']);
+    });
+
+    it('game ownership: empty methods with no notes clears the game', async () => {
+      const store = await makeStore();
+      await store.setGameOwnership({ gameId: 'frlg', methods: ['emulator'] });
+      await store.setGameOwnership({ gameId: 'swsh', methods: ['cartridge'] });
+      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['frlg', 'swsh']);
+
+      const cleared = await store.setGameOwnership({ gameId: 'frlg', methods: [] });
+      expect(cleared).toMatchObject({ gameId: 'frlg', methods: [], notes: null });
+      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['swsh']);
+    });
+
+    it('game ownership: a note alone (no methods) is retained', async () => {
+      const store = await makeStore();
+      const kept = await store.setGameOwnership({ gameId: 'pla', methods: [], notes: 'borrowed from a friend' });
+      expect(kept).toMatchObject({ gameId: 'pla', methods: [], notes: 'borrowed from a friend' });
+      expect((await store.listGameOwnership()).map((o) => o.gameId)).toEqual(['pla']);
+    });
   });
 }

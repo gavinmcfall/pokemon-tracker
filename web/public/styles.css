@@ -54,7 +54,7 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 .count-total { font-size: 15px; color: light-dark(#5A6472, #8B94A4); }
 .count-pct { font-size: 15px; font-weight: 600; color: light-dark(#5A6472, #8B94A4); }
 
-.io { display: flex; align-items: center; gap: 6px; }
+.io { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .hbtn {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 44px; padding: 0 16px; border-radius: 999px;

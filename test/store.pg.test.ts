@@ -20,7 +20,7 @@ if (!url) {
   storeContract('PgStore', async () => {
     const admin = new pg.Client({ connectionString: url });
     await admin.connect();
-    await admin.query('drop table if exists obtainability, specimen, status, entries, schema_migrations cascade');
+    await admin.query('drop table if exists game_ownership, obtainability, specimen, status, entries, schema_migrations cascade');
     await admin.end();
     const store = new PgStore(url);
     stores.push(store);

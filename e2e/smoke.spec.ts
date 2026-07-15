@@ -210,6 +210,42 @@ test('obtainability filter hides known non-matches but keeps entries with unknow
   await expect(page.locator(`${gridButton}[data-entry-key="0150-default-genderless"]`)).toBeVisible(); // unknown → kept
 });
 
+test('My Games: owning a game marks its availability and enables the "owned" filter', async ({ page }) => {
+  // Charizard (default) is obtainable in Let's Go (lgpe); mega_x only in Red/Blue
+  // (rb); Mewtwo has no obtainability. Owning lgpe should flag Charizard's chip,
+  // reveal the "In a game I own" filter, and (with the filter on) keep Charizard
+  // + the unknown Mewtwo while hiding the known-non-match mega_x.
+  await page.locator('#games-btn').click();
+  const modal = page.locator('.games-panel');
+  await expect(modal).toBeVisible();
+
+  await modal.locator('button[data-game-id="lgpe"][data-method="cartridge"]').click();
+  await expect(modal.locator('button[data-game-id="lgpe"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveCount(0);
+
+  // the owned filter appears now that a game is owned
+  const ownedFilter = page.locator('#obtain-chips button[data-obtain="owned"]');
+  await expect(ownedFilter).toBeVisible();
+
+  // Charizard's detail sheet marks the Let's Go chip as owned
+  await page.locator(`${gridButton}[data-entry-key="0006-default-male"] ~ .tile-info`).click();
+  await expect(page.locator('.sheet-section.obtain')).toContainText('✓ OWNED');
+  await page.keyboard.press('Escape');
+
+  // the owned filter keeps known-match + unknown, hides the known non-match
+  await ownedFilter.click();
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-default-male"]`)).toBeVisible();       // owned lgpe → kept
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-mega_x-male"]`)).toHaveCount(0);        // only rb → hidden
+  await expect(page.locator(`${gridButton}[data-entry-key="0150-default-genderless"]`)).toBeVisible();  // unknown → kept
+
+  // ownership is server-backed: it survives a reload
+  await page.reload();
+  await expect(page.locator(gridButton).first()).toBeVisible();
+  await page.locator('#games-btn').click();
+  await expect(page.locator('.games-panel button[data-game-id="lgpe"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {
   await page.locator('.grid .tile-info').first().click();
   await expect(page.locator('.sheet-panel')).toBeVisible();
