@@ -68,10 +68,11 @@ POST /api/import[?dryRun=1] multipart field `file` (or raw text/csv body)
 GET  /api/export            -> text/csv (round-trips through import)
 POST /api/specimens         JSON array (or { specimens:[...] }) of HOME-derived
        records -> { synced, unmatched }  (full-sync: replaces the whole set)
-GET  /api/games             -> GameWithOwnership[]  (the canonical GAMES list,
-       each with { owned, methods:[cartridge|emulator|romhack], notes })
+GET  /api/games             -> GameWithOwnership[]  (individual releases — Red
+       and Blue are separate cartridges — each with { versionGroup, owned,
+       methods:[cartridge|emulator|romhack], notes })
 POST /api/ownership         { gameId, methods:[…], notes? } -> GameOwnership
-       (per-game, multi-method; empty methods + no notes clears the game)
+       (gameId is a release slug e.g. "red"; multi-method; empty + no notes clears)
 GET  /api/sprites/status    -> { enabled, running, total, mirrored, fetched, failed, … }
 POST /api/sprites/mirror    -> 202; downloads all sprites to SPRITE_DIR in the background
 GET  /api/sprites/:key      -> image/png from the local mirror (404 if not mirrored)
@@ -114,9 +115,11 @@ mock data + localStorage:
   light up automatically wherever the API provides it.
 - **My Games** button — a modal (grouped by platform) to record which games you
   own and how: cartridge, emulator and/or romhack, per game, with an optional
-  note (`GET /api/games` + `POST /api/ownership`). Owning a game marks its
-  availability chips in the detail sheet as `✓ OWNED` and reveals an
-  **In a game I own** obtainability filter. Like the other obtainability filters,
+  note (`GET /api/games` + `POST /api/ownership`). Games are **individual
+  releases** — Red and Blue are separate cartridges, not a collated "Red/Blue".
+  Obtainability availability stays at version-group granularity (a species in
+  Red is in Blue too), so owning either release lights up that group's
+  availability chips as `✓ OWNED` and feeds the **In a game I own** filter. Like the other obtainability filters,
   it hides only *known* non-matches — a slot with no availability data stays
   visible (unknown, never a guess). Foundation for the living-dex planner
   (HOME-native vs Bank routing) still to come.

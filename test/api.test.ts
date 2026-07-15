@@ -232,35 +232,43 @@ describe('POST /api/specimens', () => {
 });
 
 describe('game ownership', () => {
-  it('GET /api/games merges the catalogue with ownership', async () => {
+  it('GET /api/games lists individual releases (Red and Blue separate) merged with ownership', async () => {
     const games = await json(await get('/api/games'));
-    // full canonical list, all not-owned by default
-    expect(games.length).toBeGreaterThan(20);
-    const sv = games.find((g: { gameId: string }) => g.gameId === 'sv');
-    expect(sv).toMatchObject({ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', generation: 9, owned: false, methods: [], notes: null });
+    // paired versions are separate rows, so the list is long
+    expect(games.length).toBeGreaterThan(30);
+    const ids = games.map((g: { gameId: string }) => g.gameId);
+    expect(ids).toContain('red');
+    expect(ids).toContain('blue');
+    expect(ids).not.toContain('rb'); // the collated group is not an ownable game
+    // a release carries its obtainability version-group
+    const scarlet = games.find((g: { gameId: string }) => g.gameId === 'scarlet');
+    expect(scarlet).toMatchObject({ gameId: 'scarlet', label: 'Scarlet', platform: 'switch', generation: 9, versionGroup: 'sv', owned: false, methods: [], notes: null });
 
-    await post('/api/ownership', { gameId: 'sv', methods: ['cartridge', 'emulator'], notes: 'main copy' });
+    await post('/api/ownership', { gameId: 'scarlet', methods: ['cartridge', 'emulator'], notes: 'main copy' });
     const after = await json(await get('/api/games'));
-    expect(after.find((g: { gameId: string }) => g.gameId === 'sv')).toMatchObject({
+    expect(after.find((g: { gameId: string }) => g.gameId === 'scarlet')).toMatchObject({
       owned: true, methods: ['cartridge', 'emulator'], notes: 'main copy',
     });
+    // its pair stays independent
+    expect(after.find((g: { gameId: string }) => g.gameId === 'violet').owned).toBe(false);
   });
 
   it('POST /api/ownership upserts and clears', async () => {
-    const set = await json(await post('/api/ownership', { gameId: 'frlg', methods: ['romhack'] }));
-    expect(set).toMatchObject({ gameId: 'frlg', methods: ['romhack'], notes: null });
+    const set = await json(await post('/api/ownership', { gameId: 'firered', methods: ['romhack'] }));
+    expect(set).toMatchObject({ gameId: 'firered', methods: ['romhack'], notes: null });
 
     // clearing (empty methods, no notes) removes it from the owned list
-    await post('/api/ownership', { gameId: 'frlg', methods: [] });
+    await post('/api/ownership', { gameId: 'firered', methods: [] });
     const games = await json(await get('/api/games'));
-    expect(games.find((g: { gameId: string }) => g.gameId === 'frlg').owned).toBe(false);
+    expect(games.find((g: { gameId: string }) => g.gameId === 'firered').owned).toBe(false);
   });
 
   it('validates gameId and methods', async () => {
     expect((await post('/api/ownership', { methods: ['cartridge'] })).status).toBe(400);
     expect((await post('/api/ownership', { gameId: 'not-a-game', methods: ['cartridge'] })).status).toBe(404);
-    expect((await post('/api/ownership', { gameId: 'sv', methods: ['bootleg'] })).status).toBe(400);
-    expect((await post('/api/ownership', { gameId: 'sv', methods: 'cartridge' })).status).toBe(400);
+    expect((await post('/api/ownership', { gameId: 'rb', methods: ['cartridge'] })).status).toBe(404); // collated group is not ownable
+    expect((await post('/api/ownership', { gameId: 'scarlet', methods: ['bootleg'] })).status).toBe(400);
+    expect((await post('/api/ownership', { gameId: 'scarlet', methods: 'cartridge' })).status).toBe(400);
   });
 });
 

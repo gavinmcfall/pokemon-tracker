@@ -167,12 +167,18 @@ export interface GameOwnershipPatch {
   notes?: string | null;
 }
 
-/** A canonical game plus the owner's ownership of it (served by GET /api/games). */
+/**
+ * One ownable game (an individual release/cartridge — Red and Blue are separate)
+ * plus the owner's ownership of it. Served by GET /api/games. `gameId` is the
+ * release slug; `versionGroup` is the obtainability group it belongs to (a mon
+ * available in Red is available in Blue), used to light up availability chips.
+ */
 export interface GameWithOwnership {
   gameId: string;
   label: string;
   platform: string;
   generation: number;
+  versionGroup: string;
   owned: boolean;
   methods: OwnershipMethod[];
   notes: string | null;

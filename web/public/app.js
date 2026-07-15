@@ -69,13 +69,16 @@ const state = {
   obtain: { owned: false, switch: false, shiny: false, gmax: false, tera: false },
   gameFilter: '',
   games: [],
-  ownedGameIds: new Set(),
+  ownedGroupIds: new Set(),
   theme: 'auto',
 };
 
+// Games are individual releases (Red and Blue are separate); obtainability
+// availability is per version-group. Owning either release lights up its group,
+// so the "owned" signal is keyed by the owned releases' versionGroups.
 function setGamesState(games) {
   state.games = games;
-  state.ownedGameIds = new Set(games.filter((g) => g.owned).map((g) => g.gameId));
+  state.ownedGroupIds = new Set(games.filter((g) => g.owned).map((g) => g.versionGroup));
 }
 
 const el = {};
@@ -199,7 +202,7 @@ function matchesFilters(e) {
     // "Owned" hides only entries we KNOW aren't in a game you own; entries with
     // no availability data stay visible (unknown, never a guess) — same rule as
     // the other obtainability filters below.
-    if (ob.owned && state.ownedGameIds.size > 0 && !e.availability.some((a) => state.ownedGameIds.has(a.gameId))) return false;
+    if (ob.owned && state.ownedGroupIds.size > 0 && !e.availability.some((a) => state.ownedGroupIds.has(a.gameId))) return false;
     if (ob.switch && !e.catchableOnSwitch) return false;
     if (ob.shiny && !e.shinyLegalSomewhere) return false;
     if (ob.gmax && !e.gmaxCapable) return false;
@@ -328,7 +331,7 @@ function renderObtain() {
   const defs = [
     // "In a game you own" only appears once at least one game is owned — an
     // otherwise-dead filter is more confusing than absent.
-    ...(state.ownedGameIds.size > 0 ? [{ key: 'owned', label: 'In a game I own', accent: T.owned }] : []),
+    ...(state.ownedGroupIds.size > 0 ? [{ key: 'owned', label: 'In a game I own', accent: T.owned }] : []),
     { key: 'switch', label: 'Switch' }, { key: 'shiny', label: 'Shiny-legal' },
     { key: 'gmax', label: 'GMax' }, { key: 'tera', label: 'Tera' },
   ];
@@ -740,7 +743,7 @@ function renderSheetInto(e, refocusCaught) {
       for (const a of rows) {
         const locked = (e.shinyLockedIn || []).includes(a.gameId);
         const origin = (e.originGames || []).includes(a.gameId);
-        const owned = state.ownedGameIds.has(a.gameId);
+        const owned = state.ownedGroupIds.has(a.gameId);
         const chip = elem('span', {
           display: 'inline-flex', alignItems: 'center', gap: '7px', minHeight: '34px', padding: '0 12px', borderRadius: '999px',
           background: owned ? `color-mix(in oklab, ${T.owned} 12%, ${T.raised})` : T.raised,
@@ -825,7 +828,7 @@ function ownershipRow(g) {
   const name = elem('span', { display: 'flex', flexDirection: 'column', gap: '1px', minWidth: '0', flex: '1' });
   name.append(elem('span', { fontSize: '14px', fontWeight: '700', color: T.text }, g.label));
   name.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', letterSpacing: '0.06em', color: T.muted },
-    `${g.gameId.toUpperCase()}${g.generation ? ` · GEN ${ROMAN[g.generation - 1] ?? g.generation}` : ''}`));
+    g.generation ? `GEN ${ROMAN[g.generation - 1] ?? g.generation}` : 'SPIN-OFF'));
   top.append(name);
 
   const toggles = elem('div', { display: 'flex', gap: '5px', flexWrap: 'wrap' });
