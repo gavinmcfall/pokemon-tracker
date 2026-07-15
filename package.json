@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "mirror": "node dist/mirror/run.js"
   },
   "engines": {
     "node": ">=22"
@@ -21,12 +22,14 @@
   "dependencies": {
     "@hono/node-server": "^1.14.0",
     "hono": "^4.7.0",
-    "pg": "^8.16.0"
+    "pg": "^8.16.0",
+    "pg-copy-streams": "^7.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.0",
     "@types/node": "^22.15.0",
     "@types/pg": "^8.15.0",
+    "@types/pg-copy-streams": "^1.2.5",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"

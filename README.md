@@ -191,6 +191,36 @@ Known v1 limits (documented, not fabricated): obtainability is species-level
 (regional-form exclusivity isn't split out yet), and pure static/event mons
 outside the curated set show sparse availability rather than wrong data.
 
+## PokéAPI mirror (`src/mirror/`)
+
+A self-syncing local mirror of PokéAPI's source data — the foundation for
+richer, offline, join-based enrichment (obtainability v2, game-ownership
+planning, …). `node dist/mirror/run.js`:
+
+1. Finds the latest commit that touched `PokeAPI/pokeapi`'s `data/v2/csv` path.
+2. If it matches what we last loaded (`<schema>.mirror_meta.synced_sha`) it's a
+   **no-op** — so a daily CronJob only does work when upstream actually changes
+   (a game/DLC release, a few times a year). Import *and* monitor in one job.
+3. Otherwise it loads **every** CSV into the `pokeapi` schema — one text-column
+   table per file (`pokemon_species`, `pokemon_dex_numbers`, `pokedexes`,
+   `version_groups`, `encounters`, …) via `COPY`, in a single transaction
+   (readers see the old tables until commit), and records the new SHA.
+
+Mirroring the *whole* dataset (not a curated subset) is deliberate: loading a
+CSV is uniform, so any future feature already has its data locally as SQL
+instead of a new HTTP integration. The mirror is a faithful passthrough (all
+columns `text`, empty cells → `NULL`); consumers cast/join as needed.
+
+Config (env): `DATABASE_URL` (required), `MIRROR_SCHEMA` (default `pokeapi`),
+`POKEAPI_REPO` (`PokeAPI/pokeapi`), `POKEAPI_CSV_PATH` (`data/v2/csv`),
+`GITHUB_TOKEN` (optional — raises the API rate limit; unauthenticated is fine
+for a daily job's two API calls), `MIRROR_FORCE=1` (reload even if unchanged).
+
+Why it matters: pokédex membership (`pokemon_dex_numbers` → `pokedexes` →
+`version_groups`) says which *games* a species is in — including legendaries and
+gift/evolution mons that have no wild-encounter table — so obtainability can be
+sourced accurately by SQL join rather than curation.
+
 ## Run locally
 
 ```bash
