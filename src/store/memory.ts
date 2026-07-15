@@ -1,5 +1,6 @@
-import type { Entry, EntryFilters, EntryWithStatus, Obtainability, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
-import { applyStatusPatch, compareEntries, normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
+import type { Entry, EntryFilters, EntryWithStatus, GameOwnership, GameOwnershipPatch, Obtainability, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import { OWNERSHIP_METHODS } from '../types.js';
+import { applyStatusPatch, compareEntries, isEmptyOwnership, normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
 
 /**
  * In-memory Store used by contract tests and the e2e harness. Must behave
@@ -10,6 +11,7 @@ export class MemoryStore implements Store {
   private statuses = new Map<string, Status>();
   private specimens = new Map<string, Specimen>();
   private obtainabilities = new Map<string, Obtainability>();
+  private ownership = new Map<string, GameOwnership>();
   now: () => Date = () => new Date();
 
   async upsertEntries(entries: Entry[]): Promise<UpsertResult> {
@@ -118,12 +120,34 @@ export class MemoryStore implements Store {
     return { upserted: next.size, unmatched };
   }
 
-  /** Test helper: wipe all entries, statuses, specimens and obtainability. */
+  async listGameOwnership(): Promise<GameOwnership[]> {
+    return [...this.ownership.values()]
+      .map((o) => ({ ...o, methods: [...o.methods] }))
+      .sort((a, b) => (a.gameId < b.gameId ? -1 : a.gameId > b.gameId ? 1 : 0));
+  }
+
+  async setGameOwnership(patch: GameOwnershipPatch): Promise<GameOwnership> {
+    if (isEmptyOwnership(patch)) {
+      this.ownership.delete(patch.gameId);
+      return { gameId: patch.gameId, methods: [], notes: null, updatedAt: this.now().toISOString() };
+    }
+    const record: GameOwnership = {
+      gameId: patch.gameId,
+      methods: OWNERSHIP_METHODS.filter((m) => patch.methods.includes(m)),
+      notes: patch.notes ?? null,
+      updatedAt: this.now().toISOString(),
+    };
+    this.ownership.set(patch.gameId, record);
+    return { ...record, methods: [...record.methods] };
+  }
+
+  /** Test helper: wipe all entries, statuses, specimens, obtainability and ownership. */
   async reset(): Promise<void> {
     this.entries.clear();
     this.statuses.clear();
     this.specimens.clear();
     this.obtainabilities.clear();
+    this.ownership.clear();
   }
 
   async ready(): Promise<void> {}

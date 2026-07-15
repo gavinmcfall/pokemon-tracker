@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { Store } from './store/store.js';
-import type { EntryFilters, EntryWithStatus, SpecimenInput, StatusPatch } from './types.js';
+import type { EntryFilters, EntryWithStatus, GameOwnership, GameWithOwnership, SpecimenInput, StatusPatch } from './types.js';
+import { parseOwnershipMethods } from './types.js';
+import { GAMES, GAME_BY_ID } from './obtainability/games.js';
 import { exportCsv, planImport } from './csv.js';
 import type { SpriteMirror } from './sprites.js';
 
@@ -197,6 +199,56 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
 
     const result = await store.replaceSpecimens(inputs);
     return c.json({ synced: result.upserted, unmatched: result.unmatched });
+  });
+
+  // ---- Game ownership -------------------------------------------------------
+  // The canonical GAMES catalogue merged with the owner's ownership (which
+  // games they have, and how). One call gives the front-end everything for the
+  // "My Games" screen and the "in a game you own" obtainability signal.
+  app.get('/api/games', async (c) => {
+    const owned = new Map<string, GameOwnership>();
+    for (const o of await store.listGameOwnership()) owned.set(o.gameId, o);
+    const games: GameWithOwnership[] = GAMES.map((g) => {
+      const o = owned.get(g.gameId);
+      return {
+        gameId: g.gameId,
+        label: g.label,
+        platform: g.platform,
+        generation: g.generation,
+        owned: Boolean(o && o.methods.length > 0),
+        methods: o?.methods ?? [],
+        notes: o?.notes ?? null,
+      };
+    });
+    return c.json(games);
+  });
+
+  // Upsert one game's ownership. Body: { gameId, methods: [...], notes? }.
+  // An empty methods set with no notes clears the game.
+  app.post('/api/ownership', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return badRequest('body must be JSON');
+    }
+    if (typeof body !== 'object' || body === null) return badRequest('body must be an object');
+    const b = body as Record<string, unknown>;
+    if (typeof b.gameId !== 'string' || b.gameId === '') return badRequest('gameId is required');
+    if (!GAME_BY_ID.has(b.gameId)) return c.json({ error: `unknown gameId "${b.gameId}"` }, 404);
+
+    const methods = parseOwnershipMethods(b.methods ?? []);
+    if ('error' in methods) return badRequest(methods.error);
+
+    const notes = textField(b.notes, 'notes');
+    if (typeof notes === 'object' && notes !== null) return badRequest(notes.error);
+
+    const result = await store.setGameOwnership({
+      gameId: b.gameId,
+      methods,
+      notes: notes === undefined ? null : notes,
+    });
+    return c.json(result);
   });
 
   app.get('/api/export', async (c) => {

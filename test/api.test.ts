@@ -231,6 +231,39 @@ describe('POST /api/specimens', () => {
   });
 });
 
+describe('game ownership', () => {
+  it('GET /api/games merges the catalogue with ownership', async () => {
+    const games = await json(await get('/api/games'));
+    // full canonical list, all not-owned by default
+    expect(games.length).toBeGreaterThan(20);
+    const sv = games.find((g: { gameId: string }) => g.gameId === 'sv');
+    expect(sv).toMatchObject({ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', generation: 9, owned: false, methods: [], notes: null });
+
+    await post('/api/ownership', { gameId: 'sv', methods: ['cartridge', 'emulator'], notes: 'main copy' });
+    const after = await json(await get('/api/games'));
+    expect(after.find((g: { gameId: string }) => g.gameId === 'sv')).toMatchObject({
+      owned: true, methods: ['cartridge', 'emulator'], notes: 'main copy',
+    });
+  });
+
+  it('POST /api/ownership upserts and clears', async () => {
+    const set = await json(await post('/api/ownership', { gameId: 'frlg', methods: ['romhack'] }));
+    expect(set).toMatchObject({ gameId: 'frlg', methods: ['romhack'], notes: null });
+
+    // clearing (empty methods, no notes) removes it from the owned list
+    await post('/api/ownership', { gameId: 'frlg', methods: [] });
+    const games = await json(await get('/api/games'));
+    expect(games.find((g: { gameId: string }) => g.gameId === 'frlg').owned).toBe(false);
+  });
+
+  it('validates gameId and methods', async () => {
+    expect((await post('/api/ownership', { methods: ['cartridge'] })).status).toBe(400);
+    expect((await post('/api/ownership', { gameId: 'not-a-game', methods: ['cartridge'] })).status).toBe(404);
+    expect((await post('/api/ownership', { gameId: 'sv', methods: ['bootleg'] })).status).toBe(400);
+    expect((await post('/api/ownership', { gameId: 'sv', methods: 'cartridge' })).status).toBe(400);
+  });
+});
+
 describe('probes', () => {
   it('healthz and readyz respond ok', async () => {
     expect((await get('/healthz')).status).toBe(200);

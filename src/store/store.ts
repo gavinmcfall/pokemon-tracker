@@ -1,4 +1,4 @@
-import type { Entry, EntryFilters, EntryWithStatus, Obtainability, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import type { Entry, EntryFilters, EntryWithStatus, GameOwnership, GameOwnershipPatch, Obtainability, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
 
 export interface UpsertResult {
   inserted: number;
@@ -62,6 +62,14 @@ export interface Store {
    * replaces all rows, keeping only entryKeys that match a live entry.
    */
   replaceObtainability(records: ObtainabilityRecord[]): Promise<SyncResult>;
+  /** All game-ownership rows the owner has recorded (games with no ownership are absent). */
+  listGameOwnership(): Promise<GameOwnership[]>;
+  /**
+   * Upsert one game's ownership. An empty methods set with no notes clears the
+   * game (row removed) and returns it as not-owned. gameId validity is the
+   * caller's responsibility (the API checks it against GAMES).
+   */
+  setGameOwnership(patch: GameOwnershipPatch): Promise<GameOwnership>;
   ready(): Promise<void>;
   close(): Promise<void>;
 }
@@ -78,6 +86,11 @@ export function applyStatusPatch(existing: Status | null, patch: StatusPatch, no
     method: patch.method !== undefined ? patch.method : (existing?.method ?? null),
     notes: patch.notes !== undefined ? patch.notes : (existing?.notes ?? null),
   };
+}
+
+/** A patch with no methods and no note = "not owned" (the row should not persist). */
+export function isEmptyOwnership(patch: GameOwnershipPatch): boolean {
+  return patch.methods.length === 0 && (patch.notes === undefined || patch.notes === null || patch.notes === '');
 }
 
 export function compareEntries(a: Entry, b: Entry): number {

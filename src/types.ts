@@ -142,6 +142,55 @@ export function entryKeyOf(dex: number, formSlug: string, gender: Gender): strin
   return `${String(dex).padStart(4, '0')}-${formSlug}-${gender}`;
 }
 
+/**
+ * How the owner has a game. Per-game and multi-method — a game may be owned
+ * several ways at once. `romhack` is first-class for planning (a hack of a base
+ * game counts as a way to obtain that game's dex); HOME-legality of romhack
+ * captures is a separate, later concern (transfer topology).
+ */
+export type OwnershipMethod = 'cartridge' | 'emulator' | 'romhack';
+
+export const OWNERSHIP_METHODS: readonly OwnershipMethod[] = ['cartridge', 'emulator', 'romhack'];
+
+/** Owner-authored ownership record for one game (keyed by GAMES gameId). */
+export interface GameOwnership {
+  gameId: string;
+  methods: OwnershipMethod[];
+  notes: string | null;
+  updatedAt: string;
+}
+
+/** Ingest shape for POST /api/ownership — an empty methods set with no notes clears the game. */
+export interface GameOwnershipPatch {
+  gameId: string;
+  methods: OwnershipMethod[];
+  notes?: string | null;
+}
+
+/** A canonical game plus the owner's ownership of it (served by GET /api/games). */
+export interface GameWithOwnership {
+  gameId: string;
+  label: string;
+  platform: string;
+  generation: number;
+  owned: boolean;
+  methods: OwnershipMethod[];
+  notes: string | null;
+}
+
+export function parseOwnershipMethods(raw: unknown): OwnershipMethod[] | { error: string } {
+  if (!Array.isArray(raw)) return { error: 'methods must be an array' };
+  const out: OwnershipMethod[] = [];
+  for (const m of raw) {
+    if (typeof m !== 'string' || !OWNERSHIP_METHODS.includes(m as OwnershipMethod)) {
+      return { error: `invalid ownership method "${String(m)}" — expected ${OWNERSHIP_METHODS.join(' | ')}` };
+    }
+    if (!out.includes(m as OwnershipMethod)) out.push(m as OwnershipMethod);
+  }
+  // Canonical order so equal sets compare/serialize identically.
+  return OWNERSHIP_METHODS.filter((m) => out.includes(m));
+}
+
 export type SeedTier = 'species' | 'forms' | 'full';
 
 export function parseSeedTier(raw: string | undefined): SeedTier {
