@@ -29,21 +29,25 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
   );
 
   // Which game version-groups is each species in (per game-specific regional
-  // dex), and is it wild-encounterable there?
+  // dex), and is it wild-encounterable there? The wild (species, version-group)
+  // set is precomputed once in a CTE and left-joined, rather than a correlated
+  // subquery per row — the mirror tables are unindexed text, so the one-pass
+  // form is much cheaper on the full dataset.
   const membership = await client.query<{ species_id: string; version_group: string; wild: boolean }>(
-    `select dn.species_id, vg.identifier as version_group,
-            exists(
-              select 1 from ${q('encounters')} e
-              join ${q('versions')} v on v.id = e.version_id
-              join ${q('pokemon')} p on p.id = e.pokemon_id
-              where p.species_id = dn.species_id and v.version_group_id = vg.id
-            ) as wild
+    `with wild as (
+       select distinct p.species_id, v.version_group_id
+       from ${q('encounters')} e
+       join ${q('versions')} v on v.id = e.version_id
+       join ${q('pokemon')} p on p.id = e.pokemon_id
+     )
+     select dn.species_id, vg.identifier as version_group,
+            bool_or(w.species_id is not null) as wild
      from ${q('pokemon_dex_numbers')} dn
-     join ${q('pokedexes')} pd on pd.id = dn.pokedex_id
+     join ${q('pokedexes')} pd on pd.id = dn.pokedex_id and pd.is_main_series = '1'
      join ${q('pokedex_version_groups')} pvg on pvg.pokedex_id = dn.pokedex_id
      join ${q('version_groups')} vg on vg.id = pvg.version_group_id
-     where pd.is_main_series = '1'
-     group by dn.species_id, vg.id, vg.identifier`,
+     left join wild w on w.species_id = dn.species_id and w.version_group_id = vg.id
+     group by dn.species_id, vg.identifier`,
   );
 
   const sourcesByDex = new Map<number, ObtainSource[]>();

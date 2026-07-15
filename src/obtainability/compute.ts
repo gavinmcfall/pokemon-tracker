@@ -22,12 +22,18 @@ export interface ObtainabilityInput {
   evolvedFromGameIds: string[];
 }
 
-// Most-direct method wins when a game offers a slot more than one way.
-const METHOD_PRIORITY = ['wild', 'gift', 'static', 'event', 'fossil', 'roaming', 'trade', 'evolve'];
+/** Known ways a slot is obtainable in a game. `available` = in the game's dex
+ *  but not confirmed wild (the mirror path's generic fallback). */
+export type ObtainMethod =
+  | 'wild' | 'gift' | 'static' | 'event' | 'fossil' | 'roaming' | 'trade' | 'evolve' | 'available';
+
+// Most-direct method wins when a game offers a slot more than one way. (`available`
+// is intentionally absent → ranks last, so any specific method beats it.)
+const METHOD_PRIORITY: ObtainMethod[] = ['wild', 'gift', 'static', 'event', 'fossil', 'roaming', 'trade', 'evolve'];
 
 // An unrecognized method ranks last, so it never spuriously beats a known one.
 function rank(method: string): number {
-  const i = METHOD_PRIORITY.indexOf(method);
+  const i = (METHOD_PRIORITY as readonly string[]).indexOf(method);
   return i === -1 ? METHOD_PRIORITY.length : i;
 }
 function moreDirect(a: string, b: string): string {
@@ -67,7 +73,7 @@ export function ownDirectlyObtainableGames(dex: number, wildGameIds: Iterable<st
 /** A candidate way a slot is obtainable in a game, before dedup. */
 export interface ObtainSource {
   gameId: string;
-  method: string;
+  method: ObtainMethod;
 }
 
 export interface SourcedInput {
@@ -129,10 +135,10 @@ export function computeObtainabilityFromSources(input: SourcedInput): Obtainabil
  */
 export function computeObtainability(input: ObtainabilityInput): Obtainability {
   const sources: ObtainSource[] = [
-    ...input.ownWildGameIds.map((gameId) => ({ gameId, method: 'wild' })),
-    ...input.evolvedFromGameIds.map((gameId) => ({ gameId, method: 'evolve' })),
-    ...(STATIC_AVAILABILITY[input.dex] ?? []).map((s) => ({ gameId: s.gameId, method: s.method })),
-    ...(STARTER_GIFTS[input.dex] ?? []).map((gameId) => ({ gameId, method: 'gift' })),
+    ...input.ownWildGameIds.map((gameId): ObtainSource => ({ gameId, method: 'wild' })),
+    ...input.evolvedFromGameIds.map((gameId): ObtainSource => ({ gameId, method: 'evolve' })),
+    ...(STATIC_AVAILABILITY[input.dex] ?? []).map((s): ObtainSource => ({ gameId: s.gameId, method: s.method })),
+    ...(STARTER_GIFTS[input.dex] ?? []).map((gameId): ObtainSource => ({ gameId, method: 'gift' })),
   ];
   return computeObtainabilityFromSources({ ...input, sources });
 }
