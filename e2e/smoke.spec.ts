@@ -195,6 +195,9 @@ test('obtainability: filters appear and the detail sheet shows availability', as
   await expect(obtain).toContainText('OBTAINABILITY');
   await expect(obtain).toContainText("Let's Go");
   await expect(obtain).toContainText('GMAX');
+  // Charizard is available in Let's Go (Switch → HOME-native), so the route line shows it
+  await expect(obtain).toContainText('TO POKÉMON HOME');
+  await expect(obtain).toContainText('HOME-NATIVE');
 });
 
 test('obtainability filter hides known non-matches but keeps entries with unknown data', async ({ page }) => {
@@ -219,6 +222,10 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   await page.locator('#games-btn').click();
   const modal = page.locator('.games-panel');
   await expect(modal).toBeVisible();
+
+  // Pokémon GO (mobile) shows only the single "Playing" (digital) toggle — no cart/emu/romhack
+  await expect(modal.locator('.game-row[data-game-id="go"] button[data-method="digital"]')).toBeVisible();
+  await expect(modal.locator('.game-row[data-game-id="go"] button[data-method="cartridge"]')).toHaveCount(0);
 
   await modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]').click();
   await expect(modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');

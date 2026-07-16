@@ -146,11 +146,21 @@ export function entryKeyOf(dex: number, formSlug: string, gender: Gender): strin
  * How the owner has a game. Per-game and multi-method — a game may be owned
  * several ways at once. `romhack` is first-class for planning (a hack of a base
  * game counts as a way to obtain that game's dex); HOME-legality of romhack
- * captures is a separate, later concern (transfer topology).
+ * captures is a separate, later concern (transfer topology). `digital` is for
+ * mobile titles (Pokémon GO) that have no cartridge — it just means "you play it".
  */
-export type OwnershipMethod = 'cartridge' | 'emulator' | 'romhack';
+export type OwnershipMethod = 'cartridge' | 'emulator' | 'romhack' | 'digital';
 
-export const OWNERSHIP_METHODS: readonly OwnershipMethod[] = ['cartridge', 'emulator', 'romhack'];
+export const OWNERSHIP_METHODS: readonly OwnershipMethod[] = ['cartridge', 'emulator', 'romhack', 'digital'];
+
+/**
+ * Which ownership methods make sense for a game on a given platform. Mobile
+ * (Pokémon GO) has no cartridge/emulator/romhack — just whether you play it
+ * (`digital`); every other platform uses the physical trio.
+ */
+export function applicableMethods(platform: string): OwnershipMethod[] {
+  return platform === 'mobile' ? ['digital'] : ['cartridge', 'emulator', 'romhack'];
+}
 
 /** Owner-authored ownership record for one game (keyed by GAMES gameId). */
 export interface GameOwnership {
@@ -179,6 +189,8 @@ export interface GameWithOwnership {
   platform: string;
   generation: number;
   versionGroup: string;
+  /** The ownership methods that make sense for this game (mobile → ['digital']). */
+  applicableMethods: OwnershipMethod[];
   owned: boolean;
   methods: OwnershipMethod[];
   notes: string | null;

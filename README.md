@@ -69,10 +69,17 @@ GET  /api/export            -> text/csv (round-trips through import)
 POST /api/specimens         JSON array (or { specimens:[...] }) of HOME-derived
        records -> { synced, unmatched }  (full-sync: replaces the whole set)
 GET  /api/games             -> GameWithOwnership[]  (individual releases — Red
-       and Blue are separate cartridges — each with { versionGroup, owned,
-       methods:[cartridge|emulator|romhack], notes })
+       and Blue are separate cartridges — each with { versionGroup,
+       applicableMethods, owned, methods, notes })
 POST /api/ownership         { gameId, methods:[…], notes? } -> GameOwnership
-       (gameId is a release slug e.g. "red"; multi-method; empty + no notes clears)
+       (gameId is a release slug e.g. "red"; multi-method; empty + no notes clears.
+        methods must be applicable to the game's platform: cartridge|emulator|
+        romhack for consoles, digital for mobile/GO)
+GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game group's
+       catches reach Pokémon HOME: native | go | bank | chain | none | unknown)
+GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game's
+       catches reach Pokémon HOME: reach native|go|bank|chain|none|unknown,
+       requiresBank, requiresGames (AND-of-ORs), human route string)
 GET  /api/sprites/status    -> { enabled, running, total, mirrored, fetched, failed, … }
 POST /api/sprites/mirror    -> 202; downloads all sprites to SPRITE_DIR in the background
 GET  /api/sprites/:key      -> image/png from the local mirror (404 if not mirrored)
@@ -114,8 +121,9 @@ mock data + localStorage:
   `shinyLockedIn`, …) the seed now computes (see **Obtainability** below); they
   light up automatically wherever the API provides it.
 - **My Games** button — a modal (grouped by platform) to record which games you
-  own and how: cartridge, emulator and/or romhack, per game, with an optional
-  note (`GET /api/games` + `POST /api/ownership`). Games are **individual
+  own and how: cartridge, emulator and/or romhack per game (mobile titles like
+  Pokémon GO show a single **Playing** toggle instead), with an optional note
+  (`GET /api/games` + `POST /api/ownership`). Games are **individual
   releases** — Red and Blue are separate cartridges, not a collated "Red/Blue".
   Obtainability availability stays at version-group granularity (a species in
   Red is in Blue too), so owning either release lights up that group's
@@ -123,6 +131,13 @@ mock data + localStorage:
   it hides only *known* non-matches — a slot with no availability data stays
   visible (unknown, never a guess). Foundation for the living-dex planner
   (HOME-native vs Bank routing) still to come.
+- **To Pokémon HOME** route line (detail sheet) — the simplest legit route into
+  Pokémon HOME across the games a species is available in (`GET /api/transfer`,
+  data in `src/obtainability/transfer.ts`): HOME-native (Switch line + GO), via
+  Pokémon Bank, or via the Gen 3→4→5 transfer chain. Curated + research-verified
+  against official HOME / Bulbapedia sources; anything uncertain is `unknown`,
+  never guessed. Ownership-agnostic for now — the living-dex planner will turn it
+  into "with the games you own" and flag the intermediate games each chain needs.
 
 Replacing it is a drop-in: overwrite `web/public/` and keep speaking the API above.
 Notes: the Google font loads from the internet (system-ui fallback keeps it usable

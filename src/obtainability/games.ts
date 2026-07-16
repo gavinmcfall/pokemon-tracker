@@ -7,7 +7,7 @@
  * `go`, `lgpe`, `xy`, `oras`) and the front-end's GAME_LABELS.
  */
 
-export type Platform = 'gb' | 'gbc' | 'gba' | 'ds' | '3ds' | 'switch' | 'mobile';
+export type Platform = 'gb' | 'gbc' | 'gba' | 'ds' | '3ds' | 'switch' | 'switch2' | 'mobile';
 
 export interface GameMeta {
   gameId: string;
@@ -39,6 +39,12 @@ export const GAMES: GameMeta[] = [
   { gameId: 'bdsp', label: 'Brilliant Diamond/Shining Pearl', platform: 'switch', generation: 8 },
   { gameId: 'pla', label: 'Legends: Arceus', platform: 'switch', generation: 8 },
   { gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', generation: 9 },
+  // Legends: Z-A — Gen-9-era release set in Kalos. HOME-native since HOME v4.0.0.
+  // (No VERSION_GROUP_TO_GAME mapping yet — the PokéAPI version-group identifier
+  // isn't confirmed here, so its availability stays "unknown" until mapped.)
+  { gameId: 'za', label: 'Legends: Z-A', platform: 'switch', generation: 9 },
+  // Gen 10, Switch 2 exclusive, 2027 — unreleased, so no availability/transfer yet.
+  { gameId: 'ww', label: 'Winds/Waves', platform: 'switch2', generation: 10 },
   { gameId: 'go', label: 'Pokémon GO', platform: 'mobile', generation: 0 },
 ];
 
@@ -135,6 +141,11 @@ export const RELEASES: ReleaseMeta[] = [
   { releaseId: 'legends-arceus', label: 'Legends: Arceus', platform: 'switch', generation: 8, versionGroup: 'pla' },
   { releaseId: 'scarlet', label: 'Scarlet', platform: 'switch', generation: 9, versionGroup: 'sv' },
   { releaseId: 'violet', label: 'Violet', platform: 'switch', generation: 9, versionGroup: 'sv' },
+  { releaseId: 'legends-z-a', label: 'Legends: Z-A', platform: 'switch', generation: 9, versionGroup: 'za' },
+  // Gen 10, Switch 2 exclusive, upcoming (2027). Listed so ownership can be
+  // tracked ahead of launch; availability + HOME transfer stay unknown until then.
+  { releaseId: 'winds', label: 'Winds', platform: 'switch2', generation: 10, versionGroup: 'ww' },
+  { releaseId: 'waves', label: 'Waves', platform: 'switch2', generation: 10, versionGroup: 'ww' },
   { releaseId: 'go', label: 'Pokémon GO', platform: 'mobile', generation: 0, versionGroup: 'go' },
 ];
 
