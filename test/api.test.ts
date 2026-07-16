@@ -288,6 +288,40 @@ describe('game ownership', () => {
   });
 });
 
+describe('GET /api/plan', () => {
+  const obFixture = (gameIds: string[]) => ({
+    availability: gameIds.map((gameId) => ({ gameId, label: gameId, platform: 'switch', method: 'wild', shinyPossible: true })),
+    gmaxCapable: false, teraAvailable: false, catchableOnSwitch: false, shinyLegalSomewhere: true,
+    unobtainableLegit: false, genderVisualDiff: false, shinyLockedIn: [], originGames: [],
+  });
+
+  it('computes verdicts + acquisitions from obtainability + ownership', async () => {
+    await store.replaceObtainability([{ entryKey: '0006-default-male', obtainability: obFixture(['sv']) }]);
+
+    // nothing owned → the SV species is need-game and SV tops the buy-list
+    let plan = await json(await get('/api/plan'));
+    const p0 = plan.species.find((s: { entryKey: string }) => s.entryKey === '0006-default-male');
+    expect(p0.verdict).toBe('need-game');
+    expect(p0.needs).toEqual([['sv']]);
+    expect(plan.acquisitions[0]).toMatchObject({ id: 'sv', unlocks: 1 });
+    expect(plan.summary.total).toBe(4);
+
+    // own Scarlet → that species flips to ready
+    await post('/api/ownership', { gameId: 'scarlet', methods: ['cartridge'] });
+    plan = await json(await get('/api/plan'));
+    const p1 = plan.species.find((s: { entryKey: string }) => s.entryKey === '0006-default-male');
+    expect(p1).toMatchObject({ verdict: 'ready', via: 'sv' });
+    expect(plan.summary.ready).toBe(1);
+  });
+
+  it('excludes romhack-only ownership from routes', async () => {
+    await store.replaceObtainability([{ entryKey: '0006-default-male', obtainability: obFixture(['sv']) }]);
+    await post('/api/ownership', { gameId: 'scarlet', methods: ['romhack'] });
+    const plan = await json(await get('/api/plan'));
+    expect(plan.species.find((s: { entryKey: string }) => s.entryKey === '0006-default-male').verdict).toBe('need-game');
+  });
+});
+
 describe('GET /api/transfer', () => {
   it('returns the HOME transfer topology keyed by gameId', async () => {
     const t = await json(await get('/api/transfer'));

@@ -117,7 +117,9 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 .type-row button:focus-visible,
 .obtain-chips button:focus-visible,
 .grid .tile-body:focus-visible,
-.grid .tile-info:focus-visible {
+.grid .tile-info:focus-visible,
+.planner button:focus-visible,
+.planner .planner-row:focus-visible {
   outline: 3px solid light-dark(#E3350D, #F4503B); outline-offset: 2px;
 }
 

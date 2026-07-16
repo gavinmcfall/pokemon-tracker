@@ -149,17 +149,24 @@ export function entryKeyOf(dex: number, formSlug: string, gender: Gender): strin
  * captures is a separate, later concern (transfer topology). `digital` is for
  * mobile titles (Pokémon GO) that have no cartridge — it just means "you play it".
  */
-export type OwnershipMethod = 'cartridge' | 'emulator' | 'romhack' | 'digital';
+export type OwnershipMethod = 'cartridge' | 'emulator' | 'romhack' | 'digital' | 'subscription';
 
-export const OWNERSHIP_METHODS: readonly OwnershipMethod[] = ['cartridge', 'emulator', 'romhack', 'digital'];
+export const OWNERSHIP_METHODS: readonly OwnershipMethod[] = ['cartridge', 'emulator', 'romhack', 'digital', 'subscription'];
 
 /**
- * Which ownership methods make sense for a game on a given platform. Mobile
- * (Pokémon GO) has no cartridge/emulator/romhack — just whether you play it
- * (`digital`); every other platform uses the physical trio.
+ * Which ownership methods make sense for a game/service on a given platform.
+ * Mobile (Pokémon GO) has no cartridge/emulator/romhack — just whether you play
+ * it (`digital`); `service` entries (Pokémon Bank, HOME Premium) are a single
+ * on/off `subscription`; every other platform uses the physical trio.
+ *
+ * `romhack` is deliberately kept out of the HOME-legal set the planner uses —
+ * see src/planner. It's fine to *own* a game via romhack, but a romhack capture
+ * can't legitimately reach HOME.
  */
 export function applicableMethods(platform: string): OwnershipMethod[] {
-  return platform === 'mobile' ? ['digital'] : ['cartridge', 'emulator', 'romhack'];
+  if (platform === 'service') return ['subscription'];
+  if (platform === 'mobile') return ['digital'];
+  return ['cartridge', 'emulator', 'romhack'];
 }
 
 /** Owner-authored ownership record for one game (keyed by GAMES gameId). */

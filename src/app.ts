@@ -4,6 +4,7 @@ import type { EntryFilters, EntryWithStatus, GameOwnership, GameWithOwnership, S
 import { applicableMethods, parseOwnershipMethods } from './types.js';
 import { RELEASES, RELEASE_BY_ID } from './obtainability/games.js';
 import { TRANSFER_BY_GAME } from './obtainability/transfer.js';
+import { computePlan, hasBankFrom, ownedRouteGroups } from './planner/compute.js';
 import { exportCsv, planImport } from './csv.js';
 import type { SpriteMirror } from './sprites.js';
 
@@ -266,6 +267,19 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
   // the same gameId as obtainability availability. Powers the detail sheet's
   // "to HOME" route line and (later) the living-dex planner.
   app.get('/api/transfer', (c) => c.json(TRANSFER_BY_GAME));
+
+  // Living-dex planner: per-species verdict (have / ready / need-game / unknown /
+  // event-only) given the games you own + Bank status, plus a ranked buy-list of
+  // the acquisitions that unlock the most. Recomputed on demand from the store.
+  app.get('/api/plan', async (c) => {
+    const [entries, ownership] = await Promise.all([store.listEntries({}), store.listGameOwnership()]);
+    const plan = computePlan({
+      entries,
+      ownedRouteGroups: ownedRouteGroups(ownership),
+      hasBank: hasBankFrom(ownership),
+    });
+    return c.json(plan);
+  });
 
   app.get('/api/export', async (c) => {
     const entries = await store.listEntries({});
