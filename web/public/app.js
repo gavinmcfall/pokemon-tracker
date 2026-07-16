@@ -127,6 +127,9 @@ const state = {
   acquireMode: 'emu-first',
   acquireRank: 'fewest-games',
   acquirePlan: null,
+  acqStepFilter: null, // itinerary stop id whose species are shown
+  acqStepKeys: null,   // Set of entryKeys for that stop
+  acqStepLabel: '',
   theme: 'auto',
 };
 
@@ -572,7 +575,7 @@ function plannerTile(label, n, color, key) {
   t.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '22px', fontWeight: '700', color }, String(n)));
   t.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', letterSpacing: '0.06em', color: T.muted }, label.toUpperCase()));
   t.dataset.verdict = key;
-  t.addEventListener('click', () => { state.planFilter = active ? 'all' : key; renderPlanner(); });
+  t.addEventListener('click', () => { state.planFilter = active ? 'all' : key; state.acqStepFilter = null; state.acqStepKeys = null; renderPlanner(); });
   return t;
 }
 
@@ -626,6 +629,7 @@ function acqChip(active, label, onClick) {
 
 function setAcquire(field, value) {
   state[field] = value;
+  state.acqStepFilter = null; state.acqStepKeys = null; // the itinerary changes
   try { localStorage.setItem(field === 'acquireMode' ? ACQ_MODE_KEY : ACQ_RANK_KEY, value); } catch { /* ignore */ }
   loadAcquire().then(() => { if (state.view === 'planner') renderPlanner(); });
 }
@@ -636,7 +640,7 @@ const shortPlatform = (p) => (p === 'service' ? 'SERVICE' : (PLATFORM_LABELS[p] 
 function acquireSection() {
   const wrap = elem('div', { display: 'flex', flexDirection: 'column', gap: '10px' });
   wrap.className = 'acquire';
-  wrap.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, 'ACQUISITION PLAN'));
+  wrap.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, 'COMPLETION PLAN'));
 
   // Strategy selectors: how you acquire games, and how to order the list.
   const strat = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
@@ -652,40 +656,76 @@ function acquireSection() {
   const plan = state.acquirePlan;
   if (!plan) { wrap.append(elem('div', { padding: '16px', textAlign: 'center', color: T.muted, fontSize: '13px' }, 'Computing plan…')); return wrap; }
 
-  // Headline
-  const headline = plan.steps.length
-    ? `Acquire ${plan.steps.length} game${plan.steps.length > 1 ? 's' : ''} to catch ${plan.covered} more of ${plan.missingTotal} missing.`
-    : `Nothing to acquire — ${plan.alreadyReady} of ${plan.missingTotal} missing are catchable now.`;
+  const stops = plan.steps.filter((s) => !s.prereq);
+  const toAcquire = plan.steps.filter((s) => !s.owned).length;
+
+  // Headline: play these N games, in order, to catch everything.
+  const headline = stops.length
+    ? `Catch your ${plan.coverable} missing across ${stops.length} game${stops.length > 1 ? 's' : ''}, in order.`
+    : `Nothing left to catch that has a known route.`;
   wrap.append(elem('div', { fontSize: '15px', fontWeight: '700', color: T.text, lineHeight: '1.4' }, headline));
   const sub = [];
-  if (plan.alreadyReady) sub.push(`${plan.alreadyReady} already catchable with what you own`);
+  if (toAcquire) sub.push(`${toAcquire} to acquire, the rest you already own`);
   if (plan.leftover.length) sub.push(`${plan.leftover.length} can’t be planned (event-only / no known route)`);
   if (sub.length) wrap.append(elem('div', { fontSize: '12.5px', color: T.muted, lineHeight: '1.4' }, sub.join(' · ')));
 
-  // Ordered shopping list
+  // Ordered itinerary — prereqs first, then numbered catch stops. Click a stop to
+  // see exactly which species to catch there.
   const list = elem('div', { display: 'flex', flexDirection: 'column', gap: '6px' });
-  plan.steps.forEach((step, i) => {
-    const via = VIA_META[step.via] ?? { label: step.via.toUpperCase(), color: 'muted' };
-    const viaColor = T[via.color] ?? T.muted;
-    const rowEl = elem('div', {
-      display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '10px',
-      background: T.card, border: `1px solid ${T.border}`,
+  let n = 0;
+  for (const step of plan.steps) {
+    const selected = !step.prereq && state.acqStepFilter === step.id;
+    const rowEl = elem('button', {
+      display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 12px', borderRadius: '10px',
+      cursor: step.prereq ? 'default' : 'pointer', font: 'inherit', textAlign: 'left',
+      background: selected ? `color-mix(in oklab, ${T.owned} 12%, ${T.card})` : T.card,
+      border: `1px solid ${selected ? T.owned : T.border}`,
     });
-    rowEl.className = 'acq-step'; rowEl.dataset.id = step.id;
-    rowEl.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '700', color: T.muted, minWidth: '20px' }, String(i + 1)));
+    rowEl.type = 'button'; rowEl.className = 'acq-step'; rowEl.dataset.id = step.id;
+    if (step.prereq) rowEl.dataset.prereq = 'true';
+
+    // marker: "GET FIRST" for prereqs, else the step number
+    rowEl.append(step.prereq
+      ? elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '8.5px', fontWeight: '700', letterSpacing: '0.05em', color: T.gold, minWidth: '20px', lineHeight: '1.1' }, 'GET\nFIRST')
+      : elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '700', color: T.muted, minWidth: '20px' }, String(++n)));
+
     const mid = elem('span', { display: 'flex', flexDirection: 'column', gap: '1px', flex: '1', minWidth: '0' });
     mid.append(elem('span', { fontSize: '14px', fontWeight: '700', color: T.text }, step.label));
     mid.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.06em', color: T.muted }, shortPlatform(step.platform)));
     rowEl.append(mid);
-    rowEl.append(elem('span', {
-      flexShrink: 0, display: 'inline-flex', alignItems: 'center', minHeight: '24px', padding: '0 10px', borderRadius: '999px',
-      background: `color-mix(in oklab, ${viaColor} 16%, ${T.raised})`, border: `1px solid ${viaColor}`,
-      fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', fontWeight: '700', letterSpacing: '0.05em', color: T.text,
-    }, via.label));
-    rowEl.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '700', color: step.unlocks > 0 ? T.owned : T.muted, minWidth: '48px', textAlign: 'right' }, step.unlocks > 0 ? `+${step.unlocks}` : '···'));
+
+    // status badge: OWN (you have it) or the acquire method
+    if (step.owned) {
+      rowEl.append(elem('span', {
+        flexShrink: 0, display: 'inline-flex', alignItems: 'center', minHeight: '24px', padding: '0 10px', borderRadius: '999px',
+        background: `color-mix(in oklab, ${T.owned} 16%, ${T.raised})`, border: `1px solid ${T.owned}`,
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', fontWeight: '700', letterSpacing: '0.05em', color: T.text,
+      }, 'OWN'));
+    } else {
+      const via = VIA_META[step.via] ?? { label: String(step.via).toUpperCase(), color: 'gold' };
+      const viaColor = T[via.color] ?? T.gold;
+      rowEl.append(elem('span', {
+        flexShrink: 0, display: 'inline-flex', alignItems: 'center', minHeight: '24px', padding: '0 10px', borderRadius: '999px',
+        background: `color-mix(in oklab, ${viaColor} 16%, ${T.raised})`, border: `1px solid ${viaColor}`,
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', fontWeight: '700', letterSpacing: '0.05em', color: T.text,
+      }, via.label));
+    }
+
+    // catch count (stops) or a transfer note (prereqs)
+    rowEl.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '700', color: step.prereq ? T.muted : T.owned, minWidth: '64px', textAlign: 'right' },
+      step.prereq ? 'transfer' : `catch ${step.catchCount}`));
+
+    if (!step.prereq) {
+      rowEl.addEventListener('click', () => {
+        state.acqStepFilter = state.acqStepFilter === step.id ? null : step.id;
+        state.acqStepKeys = state.acqStepFilter ? new Set(step.entryKeys) : null;
+        state.acqStepLabel = step.label;
+        renderPlanner();
+      });
+    }
     list.append(rowEl);
-  });
-  if (plan.steps.length) wrap.append(list);
+  }
+  wrap.append(list);
 
   return wrap;
 }
@@ -700,9 +740,9 @@ function renderPlanner() {
 
   root.append(elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '700', letterSpacing: '0.1em', color: T.text }, 'LIVING-DEX PLANNER'));
   root.append(elem('p', { fontSize: '13px', color: T.muted, lineHeight: '1.5', margin: '0' },
-    'The fastest way to acquire everything you’re missing. Pick how you buy games below; set what you already own + Bank under “My Games”.'));
+    'The order to play through your games to finish the dex. Pick how you’d get missing games below; set what you already own + Bank under “My Games”. Tap a game to see exactly what to catch there.'));
 
-  // The shopping list — the primary content.
+  // The completion itinerary — the primary content.
   root.append(acquireSection());
 
   // Breakdown by verdict (secondary). Summary tiles (click to filter).
@@ -716,20 +756,24 @@ function renderPlanner() {
   );
   root.append(tiles);
 
-  // Species list (filtered by the active verdict tile)
+  // Species list — either the species to catch at a tapped itinerary stop, or
+  // the active verdict-tile filter.
   const listWrap = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
-  const label = state.planFilter === 'all' ? 'ALL SPECIES' : (VERDICT_META[state.planFilter]?.label ?? state.planFilter).toUpperCase();
+  const byStop = Boolean(state.acqStepFilter && state.acqStepKeys);
+  const label = byStop ? `CATCH IN ${state.acqStepLabel.toUpperCase()}`
+    : state.planFilter === 'all' ? 'ALL SPECIES'
+    : (VERDICT_META[state.planFilter]?.label ?? state.planFilter).toUpperCase();
   const header = elem('div', { display: 'flex', alignItems: 'center', gap: '8px' });
   header.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, label));
-  if (state.planFilter !== 'all') {
+  if (byStop || state.planFilter !== 'all') {
     const clear = elem('button', null, 'show all'); clear.type = 'button'; clear.className = 'clear-types';
-    clear.addEventListener('click', () => { state.planFilter = 'all'; renderPlanner(); });
+    clear.addEventListener('click', () => { state.planFilter = 'all'; state.acqStepFilter = null; state.acqStepKeys = null; renderPlanner(); });
     header.append(clear);
   }
   listWrap.append(header);
 
   const filtered = state.entries
-    .filter((e) => state.planFilter === 'all' || verdictOf(e) === state.planFilter)
+    .filter((e) => byStop ? state.acqStepKeys.has(e.entryKey) : (state.planFilter === 'all' || verdictOf(e) === state.planFilter))
     .sort((a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey));
   const frag = document.createDocumentFragment();
   for (const e of filtered.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e));

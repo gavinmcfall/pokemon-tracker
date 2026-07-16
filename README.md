@@ -80,11 +80,12 @@ GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game group'
 GET  /api/plan              -> { species:[{entryKey, verdict, via?, route?, needs?}],
        summary, acquisitions }  (living-dex planner: per-species verdict —
        have|ready|need-game|unknown|event-only — given owned games + Bank)
-GET  /api/acquire?mode=&rank= -> { steps:[{id,label,via,platform,generation,unlocks}],
-       missingTotal, alreadyReady, covered, leftover }  (the ordered shopping list
-       of games/services to acquire to complete the dex. mode = cartridge-only |
-       emulator-only | emu-first | cartridge-first; rank = fewest-games |
-       fewest-consoles | oldest-gen)
+GET  /api/acquire?mode=&rank= -> { steps:[{id,label,platform,generation,owned,via,
+       catchCount,entryKeys,prereq}], missingTotal, coverable, leftover }  (the
+       completion itinerary: the ordered games to play — owned AND to-acquire —
+       each with the species to catch there. mode = cartridge-only | emulator-only
+       | emu-first | cartridge-first; rank = fewest-games | fewest-consoles |
+       oldest-gen)
 GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game's
        catches reach Pokémon HOME: reach native|go|bank|chain|none|unknown,
        requiresBank, requiresGames (AND-of-ORs), human route string)
@@ -140,9 +141,13 @@ mock data + localStorage:
   visible (unknown, never a guess). Also tracks the **bridge services** (Pokémon
   Bank, HOME Premium) the planner needs, under a "Services" group.
 - **Planner** view (header toggle) — the living-dex planner (`src/planner/`). Its
-  primary output is an **acquisition plan**: the ordered shopping list of
-  games/services to acquire so you can catch everything you're missing
-  (`GET /api/acquire`). Two levers:
+  primary output is a **completion itinerary**: the minimal ordered set of games
+  to play — the ones you **own** and the ones to **acquire** — each with the exact
+  species to catch there, covering everything you're missing (`GET /api/acquire`).
+  Tap a stop to see its species. A greedy set-cover assigns each species to its
+  simplest-tier game (direct-to-HOME over Bank over transfer-chain), so the list
+  is dominated by modern one-stop games; any Bank / chain-intermediate a stop
+  needs is a `prereq` step. Two levers:
     - **Acquire** — how you get games: cartridge-only / emulator-only / emu-first
       / cartridge-first. `-only` modes ignore your copies held in the other form;
       `-first` modes keep everything you own and label new buys by preference.
