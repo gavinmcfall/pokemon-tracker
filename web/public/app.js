@@ -107,6 +107,16 @@ const SCOPE_KEY = 'livingdex-goal-scope';
 const REGIONAL_SEGMENTS = new Set(['alola', 'alolan', 'galar', 'galarian', 'hisui', 'hisuian', 'paldea', 'paldean']);
 const isRegionalForm = (slug) => slug.split('_').some((s) => REGIONAL_SEGMENTS.has(s));
 
+// Dex VIEW consolidation — a display choice for the grid only, independent of
+// the planner's goal scope. "One per species" collapses a species to a single
+// tile (a caught slot represents it, so any-gender/any-form counts as caught).
+const DEX_VIEWS = [
+  { key: 'all', label: 'Every slot' },
+  { key: 'species', label: 'One per species' },
+  { key: 'species-regional', label: '+ Regional forms' },
+];
+const DEX_VIEW_KEY = 'livingdex-dex-view';
+
 // How a game's catches reach Pokémon HOME. Rank = simplicity (lower is simpler),
 // used to pick the easiest route among the games a species is available in.
 const REACH = {
@@ -142,15 +152,16 @@ const state = {
   acqStepFilter: null, // itinerary stop id whose species are shown
   acqStepKeys: null,   // Set of entryKeys for that stop
   acqStepLabel: '',
-  goalScope: 'phased', // GoalScope — what counts toward "done" (species-first phased by default)
+  goalScope: 'phased', // planner GoalScope — what the PLAN counts toward "done"
   planPhase: null,     // {n, of, label, caught, total} from the API when scope is phased
+  dexView: 'all',      // dex grid consolidation — display only, independent of goalScope
   theme: 'auto',
 };
 
-/* ---------- goal scope (client mirror of src/planner/scope.ts) ---------- */
-// Cache of the in-scope entryKey set; null means "everything is in scope".
-let scopeCache = { scope: null, keys: null, phase: null };
-function invalidateScope() { scopeCache = { scope: null, keys: null, phase: null }; }
+/* ---------- dex view consolidation (grouping mirrors src/planner/scope.ts) ---------- */
+// Cache of the visible entryKey set for the dex VIEW; null = every slot shows.
+let scopeCache = { view: null, keys: null };
+function invalidateScope() { scopeCache = { view: null, keys: null }; }
 
 function scopeRepresentatives(regional) {
   const groups = new Map();
@@ -174,23 +185,14 @@ function scopeRepresentatives(regional) {
   return reps;
 }
 
-/** The entryKey Set the current goal scope plans over (null = all slots). */
+/** The entryKey Set the dex VIEW shows (null = every slot). */
 function scopeKeys() {
-  if (scopeCache.scope === state.goalScope) return scopeCache.keys;
-  let keys = null;
-  const scope = state.goalScope;
-  if (scope === 'species' || scope === 'species-regional') {
-    keys = new Set(scopeRepresentatives(scope === 'species-regional').map((e) => e.entryKey));
-  } else if (scope === 'phased') {
-    const species = scopeRepresentatives(false);
-    if (species.some((e) => !isCaught(e))) keys = new Set(species.map((e) => e.entryKey));
-    else {
-      const regional = scopeRepresentatives(true);
-      if (regional.some((e) => !isCaught(e))) keys = new Set(regional.map((e) => e.entryKey));
-      // else phase 3: every slot — keys stays null
-    }
-  }
-  scopeCache = { scope, keys, phase: null };
+  if (scopeCache.view === state.dexView) return scopeCache.keys;
+  const view = state.dexView;
+  const keys = view === 'species' || view === 'species-regional'
+    ? new Set(scopeRepresentatives(view === 'species-regional').map((e) => e.entryKey))
+    : null;
+  scopeCache = { view, keys };
   return keys;
 }
 const inScope = (e) => { const k = scopeKeys(); return !k || k.has(e.entryKey); };
@@ -386,6 +388,25 @@ function renderChrome() {
   renderStatusChips(caughtCount, total);
   renderTypeChips();
   renderObtain();
+  renderViewChips();
+}
+
+// Dex VIEW consolidation chips — a display choice, deliberately separate from
+// the planner's GOAL scope (planning what to catch ≠ how you browse the dex).
+function renderViewChips() {
+  el.viewChips.replaceChildren();
+  for (const v of DEX_VIEWS) {
+    const active = state.dexView === v.key;
+    const btn = elem('button', {
+      ...chipBase(), minHeight: '38px', fontSize: '12.5px',
+      background: active ? T.text : T.card, border: `1.5px solid ${active ? T.text : T.border}`,
+      color: active ? T.page : T.muted,
+    }, v.label);
+    btn.type = 'button'; btn.dataset.view = v.key;
+    btn.setAttribute('aria-pressed', String(active));
+    btn.addEventListener('click', () => setDexView(v.key));
+    el.viewChips.append(btn);
+  }
 }
 
 function renderGenChips() {
@@ -617,9 +638,11 @@ function render() {
   if (el.typeRow) el.typeRow.hidden = planner;
   if (planner) {
     el.results.hidden = true; el.loading.hidden = true; el.empty.hidden = true; el.obtainRow.hidden = true;
+    el.viewRow.hidden = true;
     renderPlanner();
     return;
   }
+  el.viewRow.hidden = false;
   renderChrome();
   renderGrid();
 }
@@ -699,10 +722,16 @@ function setAcquire(field, value) {
 function setGoalScope(value) {
   state.goalScope = value;
   state.acqStepFilter = null; state.acqStepKeys = null; state.planFilter = 'all';
-  invalidateScope();
   try { localStorage.setItem(SCOPE_KEY, value); } catch { /* ignore */ }
-  render(); // grid + counts move with the scope immediately
+  if (state.view === 'planner') renderPlanner(); // show the chip flip while the plan reloads
   Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); });
+}
+
+function setDexView(value) {
+  state.dexView = value;
+  invalidateScope();
+  try { localStorage.setItem(DEX_VIEW_KEY, value); } catch { /* ignore */ }
+  render();
 }
 
 const shortPlatform = (p) => (p === 'service' ? 'SERVICE' : (PLATFORM_LABELS[p] ?? p.toUpperCase()));
@@ -869,10 +898,13 @@ function renderPlanner() {
   }
   listWrap.append(header);
 
+  // The species list follows the PLAN's goal scope: the server only returns
+  // verdicts for in-scope slots, so plan membership is the filter.
   const filtered = state.entries
     .filter((e) => byStop
       ? state.acqStepKeys.has(e.entryKey)
-      : inScope(e) && (state.planFilter === 'all' || verdictOf(e) === state.planFilter))
+      : (!state.planSummary || state.plan[e.entryKey] !== undefined)
+        && (state.planFilter === 'all' || verdictOf(e) === state.planFilter))
     .sort((a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey));
   const frag = document.createDocumentFragment();
   for (const e of filtered.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e));
@@ -1521,6 +1553,7 @@ function init() {
     region: $('region'), caught: $('caught'), total: $('total'), pct: $('pct'), progress: $('progress'),
     genChips: $('gen-chips'), statusChips: $('status-chips'), typeChips: $('type-chips'), search: $('search'),
     obtainRow: $('obtain-row'), obtainChips: $('obtain-chips'), gameSelect: $('game-select'), themeBtn: $('theme-btn'),
+    viewRow: $('view-row'), viewChips: $('view-chips'),
     loading: $('loading'), skeleton: $('skeleton'), empty: $('empty'), emptyTitle: $('empty-title'),
     emptyBody: $('empty-body'), emptyAction: $('empty-action'), results: $('results'), resultLabel: $('result-label'),
     grid: $('grid'), importFile: $('import-file'), toast: $('toast'), mirrorBtn: $('mirror-btn'),
@@ -1539,6 +1572,8 @@ function init() {
     if (ACQUIRE_RANKS.some((r) => r.key === savedRank)) state.acquireRank = savedRank;
     const savedScope = localStorage.getItem(SCOPE_KEY);
     if (GOAL_SCOPES.some((g) => g.key === savedScope)) state.goalScope = savedScope;
+    const savedView = localStorage.getItem(DEX_VIEW_KEY);
+    if (DEX_VIEWS.some((v) => v.key === savedView)) state.dexView = savedView;
   } catch { /* ignore */ }
   syncTheme();
 
