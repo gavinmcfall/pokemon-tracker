@@ -320,6 +320,20 @@ describe('GET /api/plan', () => {
     const plan = await json(await get('/api/plan'));
     expect(plan.species.find((s: { entryKey: string }) => s.entryKey === '0006-default-male').verdict).toBe('need-game');
   });
+
+  it('?scope= narrows the goal (species collapses forms; phased reports the phase)', async () => {
+    // Contract fixture has 4 slots across 3 species (Charizard has default + Mega X).
+    const species = await json(await get('/api/plan?scope=species'));
+    expect(species.scope).toBe('species');
+    expect(species.summary.total).toBe(3);
+    expect(species.species.map((s: { entryKey: string }) => s.entryKey)).not.toContain('0006-mega_x-male');
+
+    const phased = await json(await get('/api/plan?scope=phased'));
+    expect(phased.phase).toEqual({ n: 1, of: 3, label: 'Species', caught: 0, total: 3 });
+    expect(phased.summary.total).toBe(3);
+
+    expect((await get('/api/plan?scope=everything')).status).toBe(400);
+  });
 });
 
 describe('GET /api/acquire', () => {
@@ -345,6 +359,16 @@ describe('GET /api/acquire', () => {
   it('validates mode and rank', async () => {
     expect((await get('/api/acquire?mode=nope')).status).toBe(400);
     expect((await get('/api/acquire?rank=nope')).status).toBe(400);
+    expect((await get('/api/acquire?scope=nope')).status).toBe(400);
+  });
+
+  it('?scope= drives the itinerary goal', async () => {
+    await store.replaceObtainability([{ entryKey: '0006-default-male', obtainability: obFixture(['sv']) }]);
+    const scoped = await json(await get('/api/acquire?scope=species'));
+    expect(scoped.scope).toBe('species');
+    expect(scoped.missingTotal).toBe(3); // 3 species groups, not 4 slots
+    const phased = await json(await get('/api/acquire?scope=phased'));
+    expect(phased.phase).toMatchObject({ n: 1, label: 'Species' });
   });
 });
 

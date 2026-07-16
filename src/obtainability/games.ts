@@ -40,8 +40,8 @@ export const GAMES: GameMeta[] = [
   { gameId: 'pla', label: 'Legends: Arceus', platform: 'switch', generation: 8 },
   { gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', generation: 9 },
   // Legends: Z-A — Gen-9-era release set in Kalos. HOME-native since HOME v4.0.0.
-  // (No VERSION_GROUP_TO_GAME mapping yet — the PokéAPI version-group identifier
-  // isn't confirmed here, so its availability stays "unknown" until mapped.)
+  // Availability comes from the lumiose-city dex (base game) and the hyperspace
+  // dex (Mega Dimension DLC) via VERSION_GROUP_TO_GAME below.
   { gameId: 'za', label: 'Legends: Z-A', platform: 'switch', generation: 9 },
   // Gen 10, Switch 2 exclusive, 2027 — unreleased, so no availability/transfer yet.
   { gameId: 'ww', label: 'Winds/Waves', platform: 'switch2', generation: 10 },
@@ -68,10 +68,10 @@ export const VERSION_TO_GAME: Record<string, string> = {
 
 /**
  * PokéAPI `version_groups.identifier` → our gameId. DLC groups fold into their
- * base game (the-isle-of-armor → swsh, the-indigo-disk → sv). GameCube spin-offs
- * (colosseum, xd), Japan-only groups, and not-yet-released titles (legends-za,
- * champions, mega-dimension) are intentionally unmapped — availability sourced
- * from them is treated as "unknown" rather than guessed.
+ * base game (the-isle-of-armor → swsh, mega-dimension → za). GameCube spin-offs
+ * (colosseum, xd), Japan-only groups, and not-yet-released titles (champions)
+ * are intentionally unmapped — availability sourced from them is treated as
+ * "unknown" rather than guessed.
  */
 export const VERSION_GROUP_TO_GAME: Record<string, string> = {
   'red-blue': 'rb', yellow: 'yellow', 'gold-silver': 'gs', crystal: 'c',
@@ -83,6 +83,7 @@ export const VERSION_GROUP_TO_GAME: Record<string, string> = {
   'the-isle-of-armor': 'swsh', 'the-crown-tundra': 'swsh',
   'brilliant-diamond-shining-pearl': 'bdsp', 'legends-arceus': 'pla',
   'scarlet-violet': 'sv', 'the-teal-mask': 'sv', 'the-indigo-disk': 'sv',
+  'legends-za': 'za', 'mega-dimension': 'za',
 };
 
 /**
