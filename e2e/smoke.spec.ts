@@ -223,6 +223,10 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   const modal = page.locator('.games-panel');
   await expect(modal).toBeVisible();
 
+  // Pokémon GO (mobile) shows only the single "Playing" (digital) toggle — no cart/emu/romhack
+  await expect(modal.locator('.game-row[data-game-id="go"] button[data-method="digital"]')).toBeVisible();
+  await expect(modal.locator('.game-row[data-game-id="go"] button[data-method="cartridge"]')).toHaveCount(0);
+
   await modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]').click();
   await expect(modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');

@@ -51,12 +51,17 @@ const T = {
 const THEME_KEY = 'livingdex-theme';
 const GEN_KEY = 'livingdex-gen';
 
-// Ownership methods, in the same canonical order the API uses.
-const OWNERSHIP_METHODS = [
-  { key: 'cartridge', label: 'Cartridge', short: 'Cart' },
-  { key: 'emulator', label: 'Emulator', short: 'Emu' },
-  { key: 'romhack', label: 'Romhack', short: 'Hack' },
-];
+// Ownership method labels. Which methods apply to a given game comes from the
+// API (`applicableMethods` per release) — mobile titles (Pokémon GO) get only
+// `digital` ("Playing"), everything else the physical trio.
+const METHOD_META = {
+  cartridge: { label: 'Cartridge', short: 'Cart' },
+  emulator: { label: 'Emulator', short: 'Emu' },
+  romhack: { label: 'Romhack', short: 'Hack' },
+  digital: { label: 'Playing', short: 'Playing' },
+};
+// Canonical order, matching the API, for stable method sets.
+const METHOD_ORDER = ['cartridge', 'emulator', 'romhack', 'digital'];
 
 // How a game's catches reach Pokémon HOME. Rank = simplicity (lower is simpler),
 // used to pick the easiest route among the games a species is available in.
@@ -876,20 +881,26 @@ function ownershipRow(g) {
     g.generation ? `GEN ${ROMAN[g.generation - 1] ?? g.generation}` : 'SPIN-OFF'));
   top.append(name);
 
+  // Only the methods that make sense for this game's platform (from the API):
+  // mobile → a single "Playing" toggle, everything else the physical trio.
+  const applicable = g.applicableMethods ?? ['cartridge', 'emulator', 'romhack'];
   const toggles = elem('div', { display: 'flex', gap: '5px', flexWrap: 'wrap' });
-  for (const m of OWNERSHIP_METHODS) {
-    const on = g.methods.includes(m.key);
+  for (const key of applicable) {
+    const meta = METHOD_META[key] ?? { label: key, short: key };
+    const on = g.methods.includes(key);
     const btn = elem('button', {
       ...chipBase(), minHeight: '36px', padding: '0 12px', fontSize: '12px',
       background: on ? T.owned : T.card, border: `1.5px solid ${on ? T.owned : T.border}`,
       color: on ? T.page : T.muted,
-    }, m.short);
+    }, meta.short);
     btn.type = 'button'; btn.setAttribute('aria-pressed', String(on));
-    btn.dataset.gameId = g.gameId; btn.dataset.method = m.key;
-    btn.title = `${g.label} — ${m.label}: ${on ? 'owned' : 'not owned'}`;
-    btn.setAttribute('aria-label', `${g.label} ${m.label}`);
+    btn.dataset.gameId = g.gameId; btn.dataset.method = key;
+    btn.title = `${g.label} — ${meta.label}: ${on ? 'owned' : 'not owned'}`;
+    btn.setAttribute('aria-label', `${g.label} ${meta.label}`);
     btn.addEventListener('click', () => {
-      const next = on ? g.methods.filter((x) => x !== m.key) : OWNERSHIP_METHODS.map((x) => x.key).filter((k) => k === m.key || g.methods.includes(k));
+      const next = on
+        ? g.methods.filter((x) => x !== key)
+        : METHOD_ORDER.filter((k) => k === key || g.methods.includes(k));
       saveOwnership(g.gameId, next, g.notes);
     });
     toggles.append(btn);

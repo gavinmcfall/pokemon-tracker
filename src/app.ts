@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Store } from './store/store.js';
 import type { EntryFilters, EntryWithStatus, GameOwnership, GameWithOwnership, SpecimenInput, StatusPatch } from './types.js';
-import { parseOwnershipMethods } from './types.js';
+import { applicableMethods, parseOwnershipMethods } from './types.js';
 import { RELEASES, RELEASE_BY_ID } from './obtainability/games.js';
 import { TRANSFER_BY_GAME } from './obtainability/transfer.js';
 import { exportCsv, planImport } from './csv.js';
@@ -218,6 +218,7 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
         platform: r.platform,
         generation: r.generation,
         versionGroup: r.versionGroup,
+        applicableMethods: applicableMethods(r.platform),
         owned: Boolean(o && o.methods.length > 0),
         methods: o?.methods ?? [],
         notes: o?.notes ?? null,
@@ -238,10 +239,16 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
     if (typeof body !== 'object' || body === null) return badRequest('body must be an object');
     const b = body as Record<string, unknown>;
     if (typeof b.gameId !== 'string' || b.gameId === '') return badRequest('gameId is required');
-    if (!RELEASE_BY_ID.has(b.gameId)) return c.json({ error: `unknown gameId "${b.gameId}"` }, 404);
+    const release = RELEASE_BY_ID.get(b.gameId);
+    if (!release) return c.json({ error: `unknown gameId "${b.gameId}"` }, 404);
 
     const methods = parseOwnershipMethods(b.methods ?? []);
     if ('error' in methods) return badRequest(methods.error);
+    // Reject methods that don't apply to this game's platform (e.g. a cartridge
+    // for Pokémon GO, or `digital` for a Switch title).
+    const allowed = applicableMethods(release.platform);
+    const bad = methods.find((m) => !allowed.includes(m));
+    if (bad) return badRequest(`method "${bad}" does not apply to ${release.label} (${release.platform})`);
 
     const notes = textField(b.notes, 'notes');
     if (typeof notes === 'object' && notes !== null) return badRequest(notes.error);

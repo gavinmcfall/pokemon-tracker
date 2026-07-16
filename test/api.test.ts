@@ -240,9 +240,16 @@ describe('game ownership', () => {
     expect(ids).toContain('red');
     expect(ids).toContain('blue');
     expect(ids).not.toContain('rb'); // the collated group is not an ownable game
-    // a release carries its obtainability version-group
+    // a release carries its obtainability version-group + platform-applicable methods
     const scarlet = games.find((g: { gameId: string }) => g.gameId === 'scarlet');
-    expect(scarlet).toMatchObject({ gameId: 'scarlet', label: 'Scarlet', platform: 'switch', generation: 9, versionGroup: 'sv', owned: false, methods: [], notes: null });
+    expect(scarlet).toMatchObject({ gameId: 'scarlet', label: 'Scarlet', platform: 'switch', generation: 9, versionGroup: 'sv', applicableMethods: ['cartridge', 'emulator', 'romhack'], owned: false, methods: [], notes: null });
+    // Pokémon GO is mobile → only the "digital" (Playing) method applies
+    const go = games.find((g: { gameId: string }) => g.gameId === 'go');
+    expect(go).toMatchObject({ gameId: 'go', platform: 'mobile', applicableMethods: ['digital'] });
+    // newly-added games are present
+    expect(ids).toContain('legends-z-a');
+    expect(ids).toContain('winds');
+    expect(ids).toContain('waves');
 
     await post('/api/ownership', { gameId: 'scarlet', methods: ['cartridge', 'emulator'], notes: 'main copy' });
     const after = await json(await get('/api/games'));
@@ -261,6 +268,15 @@ describe('game ownership', () => {
     await post('/api/ownership', { gameId: 'firered', methods: [] });
     const games = await json(await get('/api/games'));
     expect(games.find((g: { gameId: string }) => g.gameId === 'firered').owned).toBe(false);
+  });
+
+  it('Pokémon GO uses the digital method; cartridge/emulator/romhack are rejected', async () => {
+    const set = await json(await post('/api/ownership', { gameId: 'go', methods: ['digital'] }));
+    expect(set).toMatchObject({ gameId: 'go', methods: ['digital'] });
+    // a physical method makes no sense for a mobile game
+    expect((await post('/api/ownership', { gameId: 'go', methods: ['cartridge'] })).status).toBe(400);
+    // and `digital` makes no sense for a cartridge game
+    expect((await post('/api/ownership', { gameId: 'scarlet', methods: ['digital'] })).status).toBe(400);
   });
 
   it('validates gameId and methods', async () => {

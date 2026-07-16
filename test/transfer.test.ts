@@ -35,8 +35,15 @@ describe('transfer topology', () => {
         case 'none':
           expect(info.possible).toBe(false);
           break;
+        case 'unknown':
+          // Unreleased / unmapped — not asserted either way. Route may be blank.
+          expect(info.directToHome).toBe(false);
+          break;
       }
-      expect(info.route.length).toBeGreaterThan(0);
+      // A known route must be spelled out; unknown/none may leave it blank.
+      if (info.reach !== 'unknown' && info.reach !== 'none') {
+        expect(info.route.length).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -51,9 +58,11 @@ describe('transfer topology', () => {
   });
 
   it('the Switch line is HOME-native and the legacy line is not', () => {
-    for (const id of ['lgpe', 'swsh', 'bdsp', 'pla', 'sv']) {
+    for (const id of ['lgpe', 'swsh', 'bdsp', 'pla', 'sv', 'za']) {
       expect(TRANSFER_BY_GAME[id]!.reach).toBe('native');
     }
+    // Unreleased Gen 10 has no known HOME route yet.
+    expect(TRANSFER_BY_GAME.ww!.reach).toBe('unknown');
     // Gen 3 needs a Gen 4 AND a Gen 5 game; Gen 4 needs a Gen 5 game.
     expect(TRANSFER_BY_GAME.e!.reach).toBe('chain');
     expect(TRANSFER_BY_GAME.e!.requiresGames).toEqual([['dp', 'pt', 'hgss'], ['bw', 'b2w2']]);

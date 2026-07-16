@@ -65,6 +65,10 @@ export const TRANSFER_BY_GAME: Record<string, TransferInfo> = {
   bdsp: { gameId: 'bdsp', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'Brilliant Diamond/Shining Pearl → HOME' },
   pla: { gameId: 'pla', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'Legends: Arceus → HOME' },
   sv: { gameId: 'sv', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'Scarlet/Violet → HOME' },
+  za: { gameId: 'za', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'Legends: Z-A → HOME', note: 'HOME-native since HOME v4.0.0 — but one-way: a Pokémon that has entered Z-A cannot return to earlier games' },
+
+  // ---- Gen 10 (Switch 2, upcoming): not released, no HOME support yet -------
+  ww: { gameId: 'ww', reach: 'unknown', directToHome: false, requiresBank: false, possible: true, requiresGames: [], route: '', note: 'Winds/Waves — unreleased (2027); Pokémon HOME support not yet announced' },
 
   // ---- Pokémon GO: direct but one-way and limited --------------------------
   go: { gameId: 'go', reach: 'go', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'GO → HOME', note: 'One-way, costs GO Transporter energy' },
