@@ -20,8 +20,8 @@ const TYPE_COLORS = {
 const ROMAN = ['I','II','III','IV','V','VI','VII','VIII','IX'];
 const REGIONS = ['Kanto','Johto','Hoenn','Sinnoh','Unova','Kalos','Alola','Galar','Paldea'];
 const TINT = 18;
-const PLATFORM_ORDER = ['gb','gbc','gba','ds','3ds','switch','switch2','mobile'];
-const PLATFORM_LABELS = { gb:'GAME BOY', gbc:'GAME BOY COLOR', gba:'GAME BOY ADVANCE', ds:'NINTENDO DS', '3ds':'NINTENDO 3DS', switch:'SWITCH', switch2:'SWITCH 2', mobile:'MOBILE' };
+const PLATFORM_ORDER = ['gb','gbc','gba','ds','3ds','switch','switch2','mobile','service'];
+const PLATFORM_LABELS = { gb:'GAME BOY', gbc:'GAME BOY COLOR', gba:'GAME BOY ADVANCE', ds:'NINTENDO DS', '3ds':'NINTENDO 3DS', switch:'SWITCH', switch2:'SWITCH 2', mobile:'MOBILE', service:'SERVICES (HOME BRIDGE)' };
 const EMU_SUGGESTIONS = ['emu:FireRed','emu:LeafGreen','emu:HeartGold','emu:SoulSilver','emu:Emerald','emu:Platinum'];
 const METHOD_FALLBACK = ['caught','bred','hatched','traded','evolved','gift','transferred'];
 // Friendly labels for the HOME originGame slugs (falls back to UPPERCASE).
@@ -59,9 +59,20 @@ const METHOD_META = {
   emulator: { label: 'Emulator', short: 'Emu' },
   romhack: { label: 'Romhack', short: 'Hack' },
   digital: { label: 'Playing', short: 'Playing' },
+  subscription: { label: 'Active', short: 'Active' },
 };
 // Canonical order, matching the API, for stable method sets.
-const METHOD_ORDER = ['cartridge', 'emulator', 'romhack', 'digital'];
+const METHOD_ORDER = ['cartridge', 'emulator', 'romhack', 'digital', 'subscription'];
+
+// Planner verdicts → display. Order = how they sort in the planner filter row.
+const VERDICT_META = {
+  ready: { label: 'Ready', color: 'owned' },
+  'need-game': { label: 'Need a game', color: 'gold' },
+  have: { label: 'Have', color: 'muted' },
+  unknown: { label: 'Unknown', color: 'muted' },
+  'event-only': { label: 'Event-only', color: 'red' },
+};
+const VERDICT_ORDER = ['ready', 'need-game', 'have', 'unknown', 'event-only'];
 
 // How a game's catches reach Pokémon HOME. Rank = simplicity (lower is simpler),
 // used to pick the easiest route among the games a species is available in.
@@ -87,6 +98,11 @@ const state = {
   games: [],
   ownedGroupIds: new Set(),
   transfer: {}, // gameId -> TransferInfo (how that game reaches HOME)
+  view: 'dex', // 'dex' | 'planner'
+  plan: {}, // entryKey -> SpeciesPlan verdict
+  planSummary: null,
+  acquisitions: [],
+  planFilter: 'all', // 'all' | verdict
   theme: 'auto',
 };
 
@@ -503,7 +519,157 @@ function renderGrid() {
   }
 }
 
-function render() { renderChrome(); renderGrid(); }
+function render() {
+  const planner = state.view === 'planner';
+  el.viewBtn.textContent = planner ? '← Dex' : 'Planner';
+  el.viewBtn.setAttribute('aria-pressed', String(planner));
+  el.planner.hidden = !planner;
+  if (el.filterRow) el.filterRow.hidden = planner;
+  if (el.typeRow) el.typeRow.hidden = planner;
+  if (planner) {
+    el.results.hidden = true; el.loading.hidden = true; el.empty.hidden = true; el.obtainRow.hidden = true;
+    renderPlanner();
+    return;
+  }
+  renderChrome();
+  renderGrid();
+}
+
+/* ---------- planner view ---------- */
+function plannerTile(label, n, color, key) {
+  const active = state.planFilter === key;
+  const t = elem('button', {
+    display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'flex-start',
+    padding: '12px 14px', borderRadius: '12px', cursor: 'pointer', font: 'inherit', textAlign: 'left',
+    background: active ? `color-mix(in oklab, ${color} 16%, ${T.card})` : T.card,
+    border: `1.5px solid ${active ? color : T.border}`, color: T.text,
+  });
+  t.type = 'button'; t.className = 'plan-tile'; t.setAttribute('aria-pressed', String(active));
+  t.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '22px', fontWeight: '700', color }, String(n)));
+  t.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', letterSpacing: '0.06em', color: T.muted }, label.toUpperCase()));
+  t.dataset.verdict = key;
+  t.addEventListener('click', () => { state.planFilter = active ? 'all' : key; renderPlanner(); });
+  return t;
+}
+
+function plannerRow(e) {
+  const p = state.plan[e.entryKey];
+  const verdict = p?.verdict ?? 'unknown';
+  const meta = VERDICT_META[verdict] ?? VERDICT_META.unknown;
+  const color = T[meta.color] ?? T.muted;
+  const row = elem('button', {
+    display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '8px 10px',
+    borderRadius: '10px', cursor: 'pointer', font: 'inherit', textAlign: 'left',
+    background: T.card, border: `1px solid ${T.border}`,
+  });
+  row.type = 'button'; row.className = 'planner-row'; row.dataset.entryKey = e.entryKey; row.dataset.verdict = verdict;
+
+  const img = elem('img', { width: '40px', height: '40px', imageRendering: 'pixelated', flexShrink: 0, filter: verdict === 'have' ? 'none' : 'none' });
+  img.src = e.spriteUrl; img.alt = ''; img.loading = 'lazy'; img.draggable = false;
+
+  const mid = elem('span', { display: 'flex', flexDirection: 'column', gap: '1px', flex: '1', minWidth: '0' });
+  const title = elem('span', { fontSize: '13.5px', fontWeight: '700', color: T.text });
+  title.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: T.muted }, '#' + String(e.dex).padStart(4, '0') + ' '), document.createTextNode(e.name + (e.formLabel ? ` · ${e.formLabel}` : '')));
+  mid.append(title);
+  const detailText = verdict === 'ready' && p ? `catch in ${gameLabel(p.via) ?? p.via}`
+    : verdict === 'need-game' && p ? `acquire ${formatNeeds(p.needs)}`
+    : verdict === 'have' ? 'in your dex'
+    : verdict === 'event-only' ? 'event-only distribution'
+    : 'no known route yet';
+  mid.append(elem('span', { fontSize: '11.5px', color: T.muted, lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, detailText));
+
+  const pill = elem('span', {
+    flexShrink: 0, display: 'inline-flex', alignItems: 'center', minHeight: '24px', padding: '0 10px', borderRadius: '999px',
+    background: `color-mix(in oklab, ${color} 16%, ${T.raised})`, border: `1px solid ${color}`,
+    fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '700', letterSpacing: '0.04em', color: T.text,
+  }, meta.label.toUpperCase());
+
+  row.append(img, mid, pill);
+  row.addEventListener('click', () => openSheet(e.entryKey));
+  return row;
+}
+
+const PLANNER_ROW_CAP = 400;
+function renderPlanner() {
+  const root = el.planner;
+  root.replaceChildren();
+  applyStyles(root, { display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '760px', margin: '0 auto' });
+  const s = state.planSummary;
+  if (!s) { root.append(elem('div', { padding: '48px 0', textAlign: 'center', color: T.muted }, 'Planner data unavailable — is the API reachable?')); return; }
+
+  root.append(elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '700', letterSpacing: '0.1em', color: T.text }, 'LIVING-DEX PLANNER'));
+  root.append(elem('p', { fontSize: '13px', color: T.muted, lineHeight: '1.5', margin: '0' },
+    'Every species routed into Pokémon HOME with the games you own. Set your games and Bank status under “My Games”.'));
+
+  // Summary tiles (click to filter)
+  const tiles = elem('div', { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))', gap: '8px' });
+  tiles.append(
+    plannerTile('Ready', s.ready, T.owned, 'ready'),
+    plannerTile('Need a game', s.needGame, T.gold, 'need-game'),
+    plannerTile('Have', s.have, T.muted, 'have'),
+    plannerTile('Unknown', s.unknown, T.muted, 'unknown'),
+    plannerTile('Event-only', s.eventOnly, T.red, 'event-only'),
+  );
+  root.append(tiles);
+
+  // Best-next acquisitions
+  const acq = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
+  acq.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, 'BEST NEXT ACQUISITIONS'));
+  if (state.acquisitions.length) {
+    for (const a of state.acquisitions) {
+      const chip = elem('div', {
+        display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '10px',
+        background: T.card, border: `1px solid ${a.kind === 'service' ? T.gold : T.border}`,
+      });
+      chip.append(elem('span', { fontSize: '13.5px', fontWeight: '700', color: T.text, flex: '1' }, a.label));
+      chip.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.05em', color: T.muted }, a.kind === 'service' ? 'SERVICE' : 'GAME'));
+      chip.append(elem('span', {
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '700',
+        color: a.unlocks > 0 ? T.owned : T.muted,
+      }, a.unlocks > 0 ? `+${a.unlocks} ready` : 'enables more'));
+      acq.append(chip);
+    }
+  } else {
+    acq.append(elem('div', { padding: '10px 12px', borderRadius: '10px', background: T.card, border: `1px solid ${T.border}`, fontSize: '13px', color: T.muted },
+      s.needGame > 0 ? 'No single purchase unlocks a species on its own — check the Need-a-game list for what each requires.' : 'Nothing to acquire — you can already route every reachable species with what you own.'));
+  }
+  root.append(acq);
+
+  // Species list (filtered by the active verdict tile)
+  const listWrap = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
+  const label = state.planFilter === 'all' ? 'ALL SPECIES' : (VERDICT_META[state.planFilter]?.label ?? state.planFilter).toUpperCase();
+  const header = elem('div', { display: 'flex', alignItems: 'center', gap: '8px' });
+  header.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, label));
+  if (state.planFilter !== 'all') {
+    const clear = elem('button', null, 'show all'); clear.type = 'button'; clear.className = 'clear-types';
+    clear.addEventListener('click', () => { state.planFilter = 'all'; renderPlanner(); });
+    header.append(clear);
+  }
+  listWrap.append(header);
+
+  const filtered = state.entries
+    .filter((e) => state.planFilter === 'all' || verdictOf(e) === state.planFilter)
+    .sort((a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey));
+  const frag = document.createDocumentFragment();
+  for (const e of filtered.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e));
+  listWrap.append(frag);
+  if (filtered.length > PLANNER_ROW_CAP) {
+    listWrap.append(elem('div', { padding: '10px', textAlign: 'center', fontSize: '12px', color: T.muted },
+      `Showing ${PLANNER_ROW_CAP} of ${filtered.length} — use the tiles above to narrow the list.`));
+  }
+  if (filtered.length === 0) {
+    listWrap.append(elem('div', { padding: '24px', textAlign: 'center', fontSize: '13px', color: T.muted }, 'Nothing in this category.'));
+  }
+  root.append(listWrap);
+}
+
+/** Refresh planner data after a change that affects routing, then re-render what's visible. */
+function refreshPlan() {
+  return loadPlan().then(() => {
+    if (state.view === 'planner') renderPlanner();
+    if (sheet.key) { const e = state.entries.find((x) => x.entryKey === sheet.key); if (e) renderSheetInto(e, false); }
+  }).catch(() => {});
+}
 
 /* ---------- status writes ---------- */
 async function saveStatus(entryKey, patch, opts = {}) {
@@ -523,10 +689,14 @@ async function saveStatus(entryKey, patch, opts = {}) {
   }
   if (opts.rerenderSheet && sheet.key === entryKey) renderSheetInto(e, true);
 
+  // Optimistic planner nudge: a fresh catch is immediately "Have".
+  if ('caught' in patch && caught && state.plan[entryKey]) state.plan[entryKey] = { ...state.plan[entryKey], verdict: 'have' };
+
   try {
     const status = await api('/api/status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     e.status = status;
     if (sheet.key === entryKey && sheet.panel && 'caught' in patch) renderSheetInto(e, false);
+    if ('caught' in patch) refreshPlan(); // catching/releasing changes Have vs the routing verdicts
   } catch (err) {
     e.status = prev;
     if (opts.membershipMayChange) render();
@@ -750,6 +920,26 @@ function renderSheetInto(e, refocusCaught) {
       call.append(strong, document.createTextNode('Event-only distribution — a known gap, not a “needed” you can farm.'));
       ob.append(call);
     }
+    // Ownership-aware plan verdict (Ready with your games / Need a game).
+    const plan = state.plan[e.entryKey];
+    if (plan && (plan.verdict === 'ready' || plan.verdict === 'need-game')) {
+      const ready = plan.verdict === 'ready';
+      const accent = ready ? T.owned : T.gold;
+      const box = elem('div', { display: 'flex', flexDirection: 'column', gap: '5px' });
+      box.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, 'YOUR PLAN'));
+      const line = elem('div', { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' });
+      line.append(elem('span', {
+        display: 'inline-flex', alignItems: 'center', minHeight: '26px', padding: '0 11px', borderRadius: '999px',
+        background: `color-mix(in oklab, ${accent} 18%, ${T.raised})`, border: `1px solid ${accent}`,
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: '11.5px', fontWeight: '700', letterSpacing: '0.05em', color: T.text,
+      }, ready ? '✓ READY' : 'NEED A GAME'));
+      const detail = ready
+        ? `catch in ${gameLabel(plan.via) ?? plan.via} — ${plan.route}`
+        : `acquire ${formatNeeds(plan.needs)}`;
+      line.append(elem('span', { fontSize: '12.5px', color: T.text, lineHeight: '1.4' }, detail));
+      box.append(line);
+      ob.append(box);
+    }
     const badges = [];
     if (e.gmaxCapable) badges.push('GMAX');
     if (e.teraAvailable) badges.push('TERA');
@@ -856,6 +1046,7 @@ async function saveOwnership(gameId, methods, notes) {
     setGamesState(state.games);
     if (gamesModal.panel) renderGamesInto();
     render();
+    refreshPlan(); // ownership changes routing — recompute verdicts + acquisitions
   } catch (err) {
     Object.assign(g, prev);
     setGamesState(state.games);
@@ -1016,6 +1207,22 @@ async function loadTransfer() {
   catch { /* transfer topology is optional chrome; the route line stays hidden */ }
 }
 
+async function loadPlan() {
+  try {
+    const plan = await api('/api/plan');
+    state.plan = Object.fromEntries(plan.species.map((s) => [s.entryKey, s]));
+    state.planSummary = plan.summary;
+    state.acquisitions = plan.acquisitions;
+  } catch { /* planner is optional chrome; the Planner view shows an empty state */ }
+}
+const verdictOf = (e) => state.plan[e.entryKey]?.verdict ?? null;
+const needLabel = (id) => (id === 'bank' ? 'Pokémon Bank' : (gameLabel(id) ?? id.toUpperCase()));
+/** Format a planner AND-of-ORs needs list, e.g. "Scarlet/Violet + any of …". */
+function formatNeeds(needs) {
+  if (!needs || !needs.length) return 'more games';
+  return needs.map((hop) => (hop.length === 1 ? needLabel(hop[0]) : `any of ${hop.map(needLabel).join(' / ')}`)).join(' + ');
+}
+
 /* ---------- filters / gen ---------- */
 function setGen(n) {
   state.gen = n;
@@ -1083,7 +1290,8 @@ function init() {
     loading: $('loading'), skeleton: $('skeleton'), empty: $('empty'), emptyTitle: $('empty-title'),
     emptyBody: $('empty-body'), emptyAction: $('empty-action'), results: $('results'), resultLabel: $('result-label'),
     grid: $('grid'), importFile: $('import-file'), toast: $('toast'), mirrorBtn: $('mirror-btn'),
-    gamesBtn: $('games-btn'),
+    gamesBtn: $('games-btn'), viewBtn: $('view-btn'), planner: $('planner'),
+    filterRow: document.querySelector('.filter-row'), typeRow: document.querySelector('.type-row'),
   });
 
   try {
@@ -1109,9 +1317,11 @@ function init() {
   el.importFile.addEventListener('change', () => { const f = el.importFile.files && el.importFile.files[0]; if (f) onImport(f); el.importFile.value = ''; });
   el.mirrorBtn.addEventListener('click', mirrorSprites);
   el.gamesBtn.addEventListener('click', openGamesModal);
+  el.viewBtn.addEventListener('click', () => { state.view = state.view === 'planner' ? 'dex' : 'planner'; render(); });
   pollMirror().catch(() => { el.mirrorBtn.hidden = true; });
   loadGames().then(render);
   loadTransfer().then(() => { if (sheet.key) { const e = state.entries.find((x) => x.entryKey === sheet.key); if (e) renderSheetInto(e, false); } });
+  loadPlan().then(() => { if (state.view === 'planner') renderPlanner(); });
 
   state.loading = true;
   el.loading.hidden = false; el.results.hidden = true; el.empty.hidden = true;

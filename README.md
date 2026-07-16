@@ -77,6 +77,10 @@ POST /api/ownership         { gameId, methods:[…], notes? } -> GameOwnership
         romhack for consoles, digital for mobile/GO)
 GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game group's
        catches reach Pokémon HOME: native | go | bank | chain | none | unknown)
+GET  /api/plan              -> { species:[{entryKey, verdict, via?, route?, needs?}],
+       summary, acquisitions }  (living-dex planner: per-species verdict —
+       have|ready|need-game|unknown|event-only — given owned games + Bank, plus a
+       ranked buy-list of what unlocks the most)
 GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game's
        catches reach Pokémon HOME: reach native|go|bank|chain|none|unknown,
        requiresBank, requiresGames (AND-of-ORs), human route string)
@@ -129,8 +133,15 @@ mock data + localStorage:
   Red is in Blue too), so owning either release lights up that group's
   availability chips as `✓ OWNED` and feeds the **In a game I own** filter. Like the other obtainability filters,
   it hides only *known* non-matches — a slot with no availability data stays
-  visible (unknown, never a guess). Foundation for the living-dex planner
-  (HOME-native vs Bank routing) still to come.
+  visible (unknown, never a guess). Also tracks the **bridge services** (Pokémon
+  Bank, HOME Premium) the planner needs, under a "Services" group.
+- **Planner** view (header toggle) — the living-dex planner (`GET /api/plan`,
+  `src/planner/`). Each species gets a verdict — **Have / Ready / Need-a-game /
+  Unknown / Event-only** — computed from availability + transfer topology + the
+  games you own + your Bank status. A game owned *only* via romhack is **not** a
+  HOME-legal route. Shows summary tiles, a ranked **best-next-acquisitions**
+  buy-list (which single game/service unlocks the most), and a filterable species
+  list; the detail sheet gains an ownership-aware "YOUR PLAN" line.
 - **To Pokémon HOME** route line (detail sheet) — the simplest legit route into
   Pokémon HOME across the games a species is available in (`GET /api/transfer`,
   data in `src/obtainability/transfer.ts`): HOME-native (Switch line + GO), via

@@ -254,6 +254,40 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   await expect(page.locator('.games-panel button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('planner: verdicts + acquisitions, and owning a game flips a species to Ready', async ({ page }) => {
+  // Harness obtainability: Charizard default → Let's Go (lgpe, HOME-native);
+  // mega_x → Red/Blue (rb, via Bank); Vivillon is caught; Mewtwo has no data.
+  await page.locator('#view-btn').click();
+  const planner = page.locator('#planner');
+  await expect(planner).toBeVisible();
+  await expect(planner).toContainText('LIVING-DEX PLANNER');
+
+  // summary: 1 Have (caught Vivillon), 2 Need-a-game (Charizard default + mega_x)
+  await expect(planner.locator('.plan-tile[data-verdict="have"]')).toContainText('1');
+  await expect(planner.locator('.plan-tile[data-verdict="need-game"]')).toContainText('2');
+  // best-next acquisitions surfaces Let's Go (Charizard default is HOME-native there)
+  await expect(planner).toContainText("Let's Go");
+
+  // filter to Need-a-game → Charizard default is listed
+  await planner.locator('.plan-tile[data-verdict="need-game"]').click();
+  await expect(planner.locator('.planner-row[data-entry-key="0006-default-male"]')).toBeVisible();
+
+  // My Games: Bank is a service (Active toggle, no cartridge); own Let's Go Pikachu
+  await page.locator('#games-btn').click();
+  const modal = page.locator('.games-panel');
+  await expect(modal.locator('.game-row[data-game-id="bank"] button[data-method="subscription"]')).toBeVisible();
+  await expect(modal.locator('.game-row[data-game-id="bank"] button[data-method="cartridge"]')).toHaveCount(0);
+  await modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]').click();
+  await page.keyboard.press('Escape');
+
+  // Charizard default now routes into HOME with a game you own → Ready count rises
+  await expect(planner.locator('.plan-tile[data-verdict="ready"]')).toContainText('1');
+
+  // back to the dex
+  await page.locator('#view-btn').click();
+  await expect(page.locator(gridButton).first()).toBeVisible();
+});
+
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {
   await page.locator('.grid .tile-info').first().click();
   await expect(page.locator('.sheet-panel')).toBeVisible();

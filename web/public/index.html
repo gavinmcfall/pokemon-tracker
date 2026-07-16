@@ -36,6 +36,7 @@
           <span class="count-pct" id="pct">0%</span>
         </div>
         <div class="io">
+          <button class="hbtn" id="view-btn" type="button" title="Living-dex planner — what you can get into HOME with the games you own">Planner</button>
           <button class="hbtn" id="games-btn" type="button" title="Track which games you own — cartridge, emulator or romhack">My Games</button>
           <a class="hbtn" id="export" href="/api/export" download>Export</a>
           <label class="hbtn" for="import-file">Import<input id="import-file" type="file" accept=".csv,text/csv" hidden></label>
@@ -81,6 +82,9 @@
         <div class="result-label" id="result-label"></div>
         <div class="grid" id="grid"></div>
       </div>
+
+      <!-- Living-dex planner view (built by app.js); toggled by #view-btn -->
+      <section class="planner" id="planner" role="region" aria-label="Living-dex planner" hidden></section>
     </main>
 
     <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>

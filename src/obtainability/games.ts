@@ -7,7 +7,7 @@
  * `go`, `lgpe`, `xy`, `oras`) and the front-end's GAME_LABELS.
  */
 
-export type Platform = 'gb' | 'gbc' | 'gba' | 'ds' | '3ds' | 'switch' | 'switch2' | 'mobile';
+export type Platform = 'gb' | 'gbc' | 'gba' | 'ds' | '3ds' | 'switch' | 'switch2' | 'mobile' | 'service';
 
 export interface GameMeta {
   gameId: string;
@@ -147,9 +147,18 @@ export const RELEASES: ReleaseMeta[] = [
   { releaseId: 'winds', label: 'Winds', platform: 'switch2', generation: 10, versionGroup: 'ww' },
   { releaseId: 'waves', label: 'Waves', platform: 'switch2', generation: 10, versionGroup: 'ww' },
   { releaseId: 'go', label: 'Pokémon GO', platform: 'mobile', generation: 0, versionGroup: 'go' },
+  // Bridge services — not games you catch in, but the planner needs to know
+  // whether they're active (Bank gates every pre-Switch route into HOME). Their
+  // versionGroup never matches a species' availability, so they don't affect the
+  // "in a game you own" markers.
+  { releaseId: 'bank', label: 'Pokémon Bank', platform: 'service', generation: 0, versionGroup: 'bank' },
+  { releaseId: 'home-premium', label: 'HOME Premium', platform: 'service', generation: 0, versionGroup: 'home-premium' },
 ];
 
 export const RELEASE_BY_ID = new Map(RELEASES.map((r) => [r.releaseId, r]));
+
+/** Release id of the Pokémon Bank service (gates pre-Switch routes into HOME). */
+export const BANK_RELEASE_ID = 'bank';
 
 const GAME_ORDER = new Map(GAMES.map((g, i) => [g.gameId, i]));
 
