@@ -64,13 +64,16 @@
         </select>
       </div>
 
-      <div class="obtain-row" id="view-row" role="group" aria-label="Dex view consolidation">
-        <span class="obtain-label">VIEW:</span>
-        <div class="obtain-chips" id="view-chips"></div>
-      </div>
     </header>
 
     <main class="main">
+      <!-- Dex VIEW consolidation lives with the grid (not the sticky header) so
+           it never eats phone-viewport height or intercepts tile taps. -->
+      <div class="obtain-row view-row" id="view-row" role="group" aria-label="Dex view consolidation" hidden>
+        <span class="obtain-label">VIEW:</span>
+        <div class="obtain-chips" id="view-chips"></div>
+      </div>
+
       <div class="loading" id="loading" hidden>
         <span class="spinner"></span> LOADING DEX DATA…
         <div class="skeleton-grid" id="skeleton"></div>

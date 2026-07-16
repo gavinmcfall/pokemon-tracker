@@ -642,7 +642,7 @@ function render() {
     renderPlanner();
     return;
   }
-  el.viewRow.hidden = false;
+  el.viewRow.hidden = state.loading; // lives with the grid; shown once entries render
   renderChrome();
   renderGrid();
 }
