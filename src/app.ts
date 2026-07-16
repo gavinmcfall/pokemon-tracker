@@ -4,7 +4,7 @@ import type { EntryFilters, EntryWithStatus, GameOwnership, GameWithOwnership, S
 import { applicableMethods, parseOwnershipMethods } from './types.js';
 import { RELEASES, RELEASE_BY_ID } from './obtainability/games.js';
 import { TRANSFER_BY_GAME } from './obtainability/transfer.js';
-import { computePlan, hasBankFrom, ownedRouteGroups } from './planner/compute.js';
+import { computePlan, computeAcquisitionPlan, hasBankFrom, ownedRouteGroups, ACQUIRE_MODES, ACQUIRE_RANKS, type AcquireMode, type AcquireRank } from './planner/compute.js';
 import { exportCsv, planImport } from './csv.js';
 import type { SpriteMirror } from './sprites.js';
 
@@ -279,6 +279,18 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
       hasBank: hasBankFrom(ownership),
     });
     return c.json(plan);
+  });
+
+  // Acquisition planner: the ordered shopping list of games/services to acquire
+  // so every missing, routable species can reach HOME. Tuned by ?mode= (how you
+  // acquire games) and ?rank= (how to order the list).
+  app.get('/api/acquire', async (c) => {
+    const mode = (c.req.query('mode') ?? 'emu-first') as AcquireMode;
+    const rank = (c.req.query('rank') ?? 'fewest-games') as AcquireRank;
+    if (!ACQUIRE_MODES.includes(mode)) return badRequest(`invalid mode "${mode}" — expected ${ACQUIRE_MODES.join(' | ')}`);
+    if (!ACQUIRE_RANKS.includes(rank)) return badRequest(`invalid rank "${rank}" — expected ${ACQUIRE_RANKS.join(' | ')}`);
+    const [entries, ownership] = await Promise.all([store.listEntries({}), store.listGameOwnership()]);
+    return c.json(computeAcquisitionPlan({ entries, ownership, mode, rank }));
   });
 
   app.get('/api/export', async (c) => {

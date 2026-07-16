@@ -261,12 +261,22 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   const planner = page.locator('#planner');
   await expect(planner).toBeVisible();
   await expect(planner).toContainText('LIVING-DEX PLANNER');
+  await expect(planner).toContainText('ACQUISITION PLAN');
 
-  // summary: 1 Have (caught Vivillon), 2 Need-a-game (Charizard default + mega_x)
+  // shopping list: acquiring Let's Go (lgpe) covers Charizard default; default mode
+  // is emu-first, so the step recommends EMULATE.
+  const lgpeStep = planner.locator('.acq-step[data-id="lgpe"]');
+  await expect(lgpeStep).toBeVisible();
+  await expect(lgpeStep).toContainText("Let's Go");
+  await expect(lgpeStep).toContainText('EMULATE');
+
+  // switching to Cartridge-only re-labels the acquisition as a cartridge buy
+  await planner.locator('.acquire button[data-mode="cartridge-only"]').click();
+  await expect(planner.locator('.acq-step[data-id="lgpe"]')).toContainText('BUY CART');
+
+  // summary tiles: 1 Have (caught Vivillon), 2 Need-a-game (Charizard default + mega_x)
   await expect(planner.locator('.plan-tile[data-verdict="have"]')).toContainText('1');
   await expect(planner.locator('.plan-tile[data-verdict="need-game"]')).toContainText('2');
-  // best-next acquisitions surfaces Let's Go (Charizard default is HOME-native there)
-  await expect(planner).toContainText("Let's Go");
 
   // filter to Need-a-game → Charizard default is listed
   await planner.locator('.plan-tile[data-verdict="need-game"]').click();
@@ -280,8 +290,10 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   await modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]').click();
   await page.keyboard.press('Escape');
 
-  // Charizard default now routes into HOME with a game you own → Ready count rises
+  // Charizard default now routes into HOME with a game you own → Ready count rises,
+  // and Let's Go drops off the shopping list.
   await expect(planner.locator('.plan-tile[data-verdict="ready"]')).toContainText('1');
+  await expect(planner.locator('.acq-step[data-id="lgpe"]')).toHaveCount(0);
 
   // back to the dex
   await page.locator('#view-btn').click();
