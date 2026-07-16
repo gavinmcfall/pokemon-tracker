@@ -95,6 +95,18 @@ const VIA_META = {
 const ACQ_MODE_KEY = 'livingdex-acq-mode';
 const ACQ_RANK_KEY = 'livingdex-acq-rank';
 
+// Goal scopes — what "finishing the dex" means (mirrors src/planner/scope.ts).
+// A species/regional-form group counts as caught when ANY of its slots is.
+const GOAL_SCOPES = [
+  { key: 'species', label: 'Species' },
+  { key: 'species-regional', label: '+ Regional' },
+  { key: 'all', label: 'Everything' },
+  { key: 'phased', label: 'Phased' },
+];
+const SCOPE_KEY = 'livingdex-goal-scope';
+const REGIONAL_SEGMENTS = new Set(['alola', 'alolan', 'galar', 'galarian', 'hisui', 'hisuian', 'paldea', 'paldean']);
+const isRegionalForm = (slug) => slug.split('_').some((s) => REGIONAL_SEGMENTS.has(s));
+
 // How a game's catches reach Pokémon HOME. Rank = simplicity (lower is simpler),
 // used to pick the easiest route among the games a species is available in.
 const REACH = {
@@ -130,8 +142,58 @@ const state = {
   acqStepFilter: null, // itinerary stop id whose species are shown
   acqStepKeys: null,   // Set of entryKeys for that stop
   acqStepLabel: '',
+  goalScope: 'phased', // GoalScope — what counts toward "done" (species-first phased by default)
+  planPhase: null,     // {n, of, label, caught, total} from the API when scope is phased
   theme: 'auto',
 };
+
+/* ---------- goal scope (client mirror of src/planner/scope.ts) ---------- */
+// Cache of the in-scope entryKey set; null means "everything is in scope".
+let scopeCache = { scope: null, keys: null, phase: null };
+function invalidateScope() { scopeCache = { scope: null, keys: null, phase: null }; }
+
+function scopeRepresentatives(regional) {
+  const groups = new Map();
+  for (const e of state.entries) {
+    const isReg = isRegionalForm(e.formSlug);
+    if (isReg && !regional) continue;
+    const key = isReg ? `${e.dex}:${e.formSlug}` : String(e.dex);
+    const arr = groups.get(key);
+    if (arr) arr.push(e); else groups.set(key, [e]);
+  }
+  const GENDER_RANK = { male: 0, genderless: 1, female: 2 };
+  const reps = [];
+  for (const members of groups.values()) {
+    members.sort((a, b) =>
+      Number(isCaught(b)) - Number(isCaught(a)) ||
+      Number(b.formSlug === 'default') - Number(a.formSlug === 'default') ||
+      (GENDER_RANK[a.gender] ?? 9) - (GENDER_RANK[b.gender] ?? 9) ||
+      a.entryKey.localeCompare(b.entryKey));
+    reps.push(members[0]);
+  }
+  return reps;
+}
+
+/** The entryKey Set the current goal scope plans over (null = all slots). */
+function scopeKeys() {
+  if (scopeCache.scope === state.goalScope) return scopeCache.keys;
+  let keys = null;
+  const scope = state.goalScope;
+  if (scope === 'species' || scope === 'species-regional') {
+    keys = new Set(scopeRepresentatives(scope === 'species-regional').map((e) => e.entryKey));
+  } else if (scope === 'phased') {
+    const species = scopeRepresentatives(false);
+    if (species.some((e) => !isCaught(e))) keys = new Set(species.map((e) => e.entryKey));
+    else {
+      const regional = scopeRepresentatives(true);
+      if (regional.some((e) => !isCaught(e))) keys = new Set(regional.map((e) => e.entryKey));
+      // else phase 3: every slot — keys stays null
+    }
+  }
+  scopeCache = { scope, keys, phase: null };
+  return keys;
+}
+const inScope = (e) => { const k = scopeKeys(); return !k || k.has(e.entryKey); };
 
 /** The simplest HOME route among the games a species is available in (or null). */
 function bestHomeRoute(e) {
@@ -261,7 +323,7 @@ const hasEnrichment = (e) => Array.isArray(e.availability);
 function enrichmentPresent() { return state.entries.some(hasEnrichment); }
 
 /* ---------- selectors ---------- */
-function genEntries() { return state.entries.filter((e) => e.generation === state.gen); }
+function genEntries() { return state.entries.filter((e) => e.generation === state.gen && inScope(e)); }
 function matchesFilters(e) {
   if (state.types.length && !e.types.some((t) => state.types.includes(t))) return false;
   const c = isCaught(e);
@@ -634,6 +696,15 @@ function setAcquire(field, value) {
   loadAcquire().then(() => { if (state.view === 'planner') renderPlanner(); });
 }
 
+function setGoalScope(value) {
+  state.goalScope = value;
+  state.acqStepFilter = null; state.acqStepKeys = null; state.planFilter = 'all';
+  invalidateScope();
+  try { localStorage.setItem(SCOPE_KEY, value); } catch { /* ignore */ }
+  render(); // grid + counts move with the scope immediately
+  Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); });
+}
+
 const shortPlatform = (p) => (p === 'service' ? 'SERVICE' : (PLATFORM_LABELS[p] ?? p.toUpperCase()));
 
 /** The "shopping list to complete the dex" — the primary planner content. */
@@ -727,6 +798,16 @@ function acquireSection() {
   }
   wrap.append(list);
 
+  // Reality check: Bank can no longer be newly installed (3DS eShop closed
+  // March 2023) — a Bank prereq only works if it's already on your 3DS.
+  if (plan.steps.some((s) => s.id === 'bank' && !s.owned)) {
+    wrap.append(elem('div', {
+      border: `1.5px solid ${T.gold}`, borderRadius: '12px', padding: '10px 14px',
+      fontSize: '12.5px', lineHeight: '1.5', color: T.text,
+    }, '⚠ Pokémon Bank can no longer be newly downloaded (the 3DS eShop closed in March 2023). '
+      + 'This route assumes Bank is already installed on your 3DS — if it isn’t, the pre-Switch stops can’t reach HOME.'));
+  }
+
   return wrap;
 }
 
@@ -740,7 +821,23 @@ function renderPlanner() {
 
   root.append(elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '700', letterSpacing: '0.1em', color: T.text }, 'LIVING-DEX PLANNER'));
   root.append(elem('p', { fontSize: '13px', color: T.muted, lineHeight: '1.5', margin: '0' },
-    'The order to play through your games to finish the dex. Pick how you’d get missing games below; set what you already own + Bank under “My Games”. Tap a game to see exactly what to catch there.'));
+    'The order to play through your games to finish the dex. Pick your goal and how you’d get missing games below; set what you already own + Bank under “My Games”. Tap a game to see exactly what to catch there.'));
+
+  // Goal scope: what "done" means (species / +regional / everything / phased).
+  const goalRow = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' });
+  goalRow.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, 'GOAL:'));
+  for (const g of GOAL_SCOPES) { const b = acqChip(state.goalScope === g.key, g.label, () => setGoalScope(g.key)); b.dataset.scope = g.key; goalRow.append(b); }
+  root.append(goalRow);
+
+  // Scope progress: phase banner (phased) or a plain caught-of-goal line.
+  const ph = state.planPhase;
+  const goalLine = ph
+    ? `PHASE ${ph.n}/${ph.of} — ${ph.label.toUpperCase()} · ${ph.caught}/${ph.total} caught`
+    : `${(GOAL_SCOPES.find((g) => g.key === state.goalScope)?.label ?? state.goalScope).toUpperCase()} · ${s.have}/${s.total} caught`;
+  const goalEl = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '700', letterSpacing: '0.06em', color: T.text });
+  goalEl.dataset.role = 'goal-progress';
+  goalEl.textContent = goalLine;
+  root.append(goalEl);
 
   // The completion itinerary — the primary content.
   root.append(acquireSection());
@@ -773,7 +870,9 @@ function renderPlanner() {
   listWrap.append(header);
 
   const filtered = state.entries
-    .filter((e) => byStop ? state.acqStepKeys.has(e.entryKey) : (state.planFilter === 'all' || verdictOf(e) === state.planFilter))
+    .filter((e) => byStop
+      ? state.acqStepKeys.has(e.entryKey)
+      : inScope(e) && (state.planFilter === 'all' || verdictOf(e) === state.planFilter))
     .sort((a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey));
   const frag = document.createDocumentFragment();
   for (const e of filtered.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e));
@@ -807,6 +906,7 @@ async function saveStatus(entryKey, patch, opts = {}) {
 
   const body = { entryKey, caught };
   for (const f of ['gameOrigin', 'method', 'notes']) if (f in patch) body[f] = patch[f];
+  if ('caught' in patch) invalidateScope(); // caught-any group representatives may shift
 
   if (opts.membershipMayChange) {
     const nowKeys = visibleEntries().map((x) => x.entryKey).join(',');
@@ -824,6 +924,7 @@ async function saveStatus(entryKey, patch, opts = {}) {
     if ('caught' in patch) refreshPlan(); // catching/releasing changes Have vs the routing verdicts
   } catch (err) {
     e.status = prev;
+    invalidateScope();
     if (opts.membershipMayChange) render();
     if (sheet.key === entryKey) renderSheetInto(e, false);
     toast(`Couldn't save: ${err.message}`, true);
@@ -1334,16 +1435,17 @@ async function loadTransfer() {
 
 async function loadPlan() {
   try {
-    const plan = await api('/api/plan');
+    const plan = await api(`/api/plan?scope=${encodeURIComponent(state.goalScope)}`);
     state.plan = Object.fromEntries(plan.species.map((s) => [s.entryKey, s]));
     state.planSummary = plan.summary;
     state.acquisitions = plan.acquisitions;
+    state.planPhase = plan.phase ?? null;
   } catch { /* planner is optional chrome; the Planner view shows an empty state */ }
 }
 
 async function loadAcquire() {
   try {
-    state.acquirePlan = await api(`/api/acquire?mode=${encodeURIComponent(state.acquireMode)}&rank=${encodeURIComponent(state.acquireRank)}`);
+    state.acquirePlan = await api(`/api/acquire?mode=${encodeURIComponent(state.acquireMode)}&rank=${encodeURIComponent(state.acquireRank)}&scope=${encodeURIComponent(state.goalScope)}`);
   } catch { state.acquirePlan = null; }
 }
 const verdictOf = (e) => state.plan[e.entryKey]?.verdict ?? null;
@@ -1367,6 +1469,7 @@ function ingest(entries) {
   // e.availability, e.gmaxCapable, …) light up when the API provides them.
   for (const e of entries) if (e.obtainability) Object.assign(e, e.obtainability);
   state.entries = entries;
+  invalidateScope();
   state.gensAvailable = new Set(entries.map((e) => e.generation));
   if (!state.gensAvailable.has(state.gen)) state.gen = Math.min(...state.gensAvailable) || 1;
 }
@@ -1434,6 +1537,8 @@ function init() {
     if (ACQUIRE_MODES.some((m) => m.key === savedMode)) state.acquireMode = savedMode;
     const savedRank = localStorage.getItem(ACQ_RANK_KEY);
     if (ACQUIRE_RANKS.some((r) => r.key === savedRank)) state.acquireRank = savedRank;
+    const savedScope = localStorage.getItem(SCOPE_KEY);
+    if (GOAL_SCOPES.some((g) => g.key === savedScope)) state.goalScope = savedScope;
   } catch { /* ignore */ }
   syncTheme();
 

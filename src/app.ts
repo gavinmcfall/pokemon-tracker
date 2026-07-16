@@ -5,6 +5,7 @@ import { applicableMethods, parseOwnershipMethods } from './types.js';
 import { RELEASES, RELEASE_BY_ID } from './obtainability/games.js';
 import { TRANSFER_BY_GAME } from './obtainability/transfer.js';
 import { computePlan, computeAcquisitionPlan, hasBankFrom, ownedRouteGroups, ACQUIRE_MODES, ACQUIRE_RANKS, type AcquireMode, type AcquireRank } from './planner/compute.js';
+import { GOAL_SCOPES, parseGoalScope, scopeEntries } from './planner/scope.js';
 import { exportCsv, planImport } from './csv.js';
 import type { SpriteMirror } from './sprites.js';
 
@@ -271,26 +272,35 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
   // Living-dex planner: per-species verdict (have / ready / need-game / unknown /
   // event-only) given the games you own + Bank status, plus a ranked buy-list of
   // the acquisitions that unlock the most. Recomputed on demand from the store.
+  // ?scope= (GoalScope) picks which slots count toward the goal — species /
+  // species+regional / everything / phased (species first).
   app.get('/api/plan', async (c) => {
+    const scope = parseGoalScope(c.req.query('scope'), 'all');
+    if (scope === null) return badRequest(`invalid scope "${c.req.query('scope')}" — expected ${GOAL_SCOPES.join(' | ')}`);
     const [entries, ownership] = await Promise.all([store.listEntries({}), store.listGameOwnership()]);
+    const scoped = scopeEntries(entries, scope);
     const plan = computePlan({
-      entries,
+      entries: scoped.entries,
       ownedRouteGroups: ownedRouteGroups(ownership),
       hasBank: hasBankFrom(ownership),
     });
-    return c.json(plan);
+    return c.json({ ...plan, scope, ...(scoped.phase ? { phase: scoped.phase } : {}) });
   });
 
   // Acquisition planner: the ordered shopping list of games/services to acquire
   // so every missing, routable species can reach HOME. Tuned by ?mode= (how you
-  // acquire games) and ?rank= (how to order the list).
+  // acquire games), ?rank= (how to order the list) and ?scope= (the goal).
   app.get('/api/acquire', async (c) => {
     const mode = (c.req.query('mode') ?? 'emu-first') as AcquireMode;
     const rank = (c.req.query('rank') ?? 'fewest-games') as AcquireRank;
+    const scope = parseGoalScope(c.req.query('scope'), 'all');
     if (!ACQUIRE_MODES.includes(mode)) return badRequest(`invalid mode "${mode}" — expected ${ACQUIRE_MODES.join(' | ')}`);
     if (!ACQUIRE_RANKS.includes(rank)) return badRequest(`invalid rank "${rank}" — expected ${ACQUIRE_RANKS.join(' | ')}`);
+    if (scope === null) return badRequest(`invalid scope "${c.req.query('scope')}" — expected ${GOAL_SCOPES.join(' | ')}`);
     const [entries, ownership] = await Promise.all([store.listEntries({}), store.listGameOwnership()]);
-    return c.json(computeAcquisitionPlan({ entries, ownership, mode, rank }));
+    const scoped = scopeEntries(entries, scope);
+    const plan = computeAcquisitionPlan({ entries: scoped.entries, ownership, mode, rank });
+    return c.json({ ...plan, scope, ...(scoped.phase ? { phase: scoped.phase } : {}) });
   });
 
   app.get('/api/export', async (c) => {

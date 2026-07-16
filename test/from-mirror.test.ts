@@ -15,10 +15,10 @@ const FIXTURE: Record<string, string> = {
   versions: 'id,version_group_id,identifier\n24,15,x\n31,20,sword\n',
   pokedexes: 'id,region_id,identifier,is_main_series\n12,6,kalos-central,1\n27,8,galar,1\n1,,national,1\n',
   pokedex_version_groups: 'pokedex_id,version_group_id\n12,15\n27,20\n',
-  pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n6,12,6\n6,27,384\n888,27,138\n6,1,6\n888,1,888\n',
-  pokemon_species: 'id,generation_id,has_gender_differences\n6,1,0\n888,8,0\n',
-  pokemon: 'id,species_id,identifier\n6,6,charizard\n888,888,zacian\n',
-  pokemon_forms: 'id,pokemon_id,identifier\n6,6,charizard\n9999,6,charizard-gmax\n888,888,zacian\n',
+  pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n6,12,6\n6,27,384\n888,27,138\n6,1,6\n888,1,888\n893,27,999\n',
+  pokemon_species: 'id,generation_id,has_gender_differences\n6,1,0\n888,8,0\n893,8,0\n808,7,0\n',
+  pokemon: 'id,species_id,identifier\n6,6,charizard\n888,888,zacian\n893,893,zarude\n808,808,meltan\n',
+  pokemon_forms: 'id,pokemon_id,identifier\n6,6,charizard\n9999,6,charizard-gmax\n888,888,zacian\n893,893,zarude\n808,808,meltan\n',
   encounters: 'id,version_id,pokemon_id\n1,31,888\n',
 };
 
@@ -48,6 +48,18 @@ const FIXTURE: Record<string, string> = {
       ]);
       expect(zacian.shinyLockedIn).toEqual(['swsh']);           // curated shiny-lock
       expect(zacian.catchableOnSwitch).toBe(true);
+
+      // Zarude is in the Galar dex but was event-only there: the curated
+      // exclusion drops the listing and the species renders event-only.
+      const zarude = byDex.get(893)!;
+      expect(zarude.availability).toEqual([]);
+      expect(zarude.unobtainableLegit).toBe(true);
+
+      // Meltan: dex-listed nowhere here, but curated GO availability applies.
+      const meltan = byDex.get(808)!;
+      expect(meltan.availability).toEqual([
+        { gameId: 'go', label: 'Pokémon GO', platform: 'mobile', method: 'static', shinyPossible: true },
+      ]);
     } finally {
       await client.query('drop schema if exists pokeapi_fx cascade').catch(() => {});
       await client.end();

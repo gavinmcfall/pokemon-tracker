@@ -7,6 +7,9 @@ const gridButton = '.grid .tile-body';
 
 test.beforeEach(async ({ page, request }) => {
   await request.post('/e2e/reset');
+  // These specs exercise every slot (forms included); pin the goal scope to
+  // "Everything" — the dedicated goal-scope spec covers the other scopes.
+  await page.addInitScript(() => localStorage.setItem('livingdex-goal-scope', 'all'));
   await page.goto('/');
   await expect(page.locator(gridButton).first()).toBeVisible();
 });
@@ -294,6 +297,33 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   // back to the dex
   await page.locator('#view-btn').click();
   await expect(page.locator(gridButton).first()).toBeVisible();
+});
+
+test('goal scope: species/phased collapse forms; the planner shows phase progress', async ({ page }) => {
+  // Everything (pinned by beforeEach): Gen I shows all 3 slots.
+  await expect(page.locator(gridButton)).toHaveCount(3);
+
+  await page.locator('#view-btn').click();
+  const planner = page.locator('#planner');
+  await expect(planner.locator('.acquire ~ *').first()).toBeAttached(); // planner rendered
+  await expect(planner.locator('button[data-scope="all"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(planner.locator('[data-role="goal-progress"]')).toContainText('EVERYTHING');
+
+  // Switch to Phased → phase 1 is species: Mega Charizard X leaves the goal.
+  await planner.locator('button[data-scope="phased"]').click();
+  await expect(planner.locator('[data-role="goal-progress"]')).toContainText('PHASE 1/3 — SPECIES');
+  await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/3 caught'); // Vivillon counts
+
+  // The dex grid follows the scope: Gen I now shows 2 tiles (no mega_x slot).
+  await page.locator('#view-btn').click();
+  await expect(page.locator(gridButton)).toHaveCount(2);
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-mega_x-male"]`)).toHaveCount(0);
+  await expect(page.locator('#total')).toHaveText('/ 2');
+
+  // Species scope behaves the same for this fixture.
+  await page.locator('#view-btn').click();
+  await planner.locator('button[data-scope="species"]').click();
+  await expect(planner.locator('[data-role="goal-progress"]')).toContainText('SPECIES · 1/3 caught');
 });
 
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {

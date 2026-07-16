@@ -2,7 +2,7 @@ import type pg from 'pg';
 import type { Obtainability } from '../types.js';
 import { VERSION_GROUP_TO_GAME } from './games.js';
 import { computeObtainabilityFromSources, type ObtainSource } from './compute.js';
-import { STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
+import { AVAILABILITY_EXCLUSIONS, STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
 
 /**
  * Source obtainability for every species from the local PokéAPI mirror, keyed by
@@ -58,7 +58,13 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
   };
   for (const row of membership.rows) {
     const gameId = VERSION_GROUP_TO_GAME[row.version_group];
-    if (gameId) push(Number(row.species_id), { gameId, method: row.wild ? 'wild' : 'available' });
+    if (!gameId) continue;
+    const dex = Number(row.species_id);
+    // Dex membership isn't obtainability for event-only listings (Jirachi is in
+    // the Hoenn dex but was never catchable in gen 3) — drop the curated
+    // exceptions; real routes come back via STATIC_AVAILABILITY.
+    if (AVAILABILITY_EXCLUSIONS[dex]?.includes(gameId)) continue;
+    push(dex, { gameId, method: row.wild ? 'wild' : 'available' });
   }
   // Curated static/gift as a supplement, for the rare mon a regional dex omits.
   for (const [dexStr, entries] of Object.entries(STATIC_AVAILABILITY)) {

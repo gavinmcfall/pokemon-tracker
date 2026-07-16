@@ -77,15 +77,16 @@ POST /api/ownership         { gameId, methods:[…], notes? } -> GameOwnership
         romhack for consoles, digital for mobile/GO)
 GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game group's
        catches reach Pokémon HOME: native | go | bank | chain | none | unknown)
-GET  /api/plan              -> { species:[{entryKey, verdict, via?, route?, needs?}],
-       summary, acquisitions }  (living-dex planner: per-species verdict —
-       have|ready|need-game|unknown|event-only — given owned games + Bank)
-GET  /api/acquire?mode=&rank= -> { steps:[{id,label,platform,generation,owned,via,
-       catchCount,entryKeys,prereq}], missingTotal, coverable, leftover }  (the
-       completion itinerary: the ordered games to play — owned AND to-acquire —
-       each with the species to catch there. mode = cartridge-only | emulator-only
-       | emu-first | cartridge-first; rank = fewest-games | fewest-consoles |
-       oldest-gen)
+GET  /api/plan?scope=       -> { species:[{entryKey, verdict, via?, route?, needs?}],
+       summary, acquisitions, scope, phase? }  (living-dex planner: per-species
+       verdict — have|ready|need-game|unknown|event-only — given owned games + Bank)
+GET  /api/acquire?mode=&rank=&scope= -> { steps:[{id,label,platform,generation,owned,
+       via,catchCount,entryKeys,prereq}], missingTotal, coverable, leftover, scope,
+       phase? }  (the completion itinerary: the ordered games to play — owned AND
+       to-acquire — each with the species to catch there. mode = cartridge-only |
+       emulator-only | emu-first | cartridge-first; rank = fewest-games |
+       fewest-consoles | oldest-gen; scope = species | species-regional | all |
+       phased — what "finishing the dex" means, see Goal scopes below)
 GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game's
        catches reach Pokémon HOME: reach native|go|bank|chain|none|unknown,
        requiresBank, requiresGames (AND-of-ORs), human route string)
@@ -147,11 +148,24 @@ mock data + localStorage:
   Tap a stop to see its species. A greedy set-cover assigns each species to its
   simplest-tier game (direct-to-HOME over Bank over transfer-chain), so the list
   is dominated by modern one-stop games; any Bank / chain-intermediate a stop
-  needs is a `prereq` step. Two levers:
+  needs is a `prereq` step. Three levers:
+    - **Goal scopes** (`src/planner/scope.ts`) — what "finishing the dex" means.
+      The seed stores every slot (forms × genders); the goal picks which count:
+      **Species** (one per species — the classic National Living Dex), **+
+      Regional** (adds Alolan/Galarian/Hisuian/Paldean forms), **Everything**
+      (all slots), or **Phased** (the default: the goal is everything, worked
+      species-first → regional forms → every remaining slot; the planner and the
+      dex grid target the first incomplete phase and show `PHASE n/3` progress).
+      A species/form group counts as caught when ANY of its slots is caught — the
+      planner never asks you to re-catch a species because you ticked the other
+      gender. The dex grid follows the scope (out-of-scope slots are hidden).
     - **Acquire** — how you get games: cartridge-only / emulator-only / emu-first
       / cartridge-first. `-only` modes ignore your copies held in the other form;
       `-first` modes keep everything you own and label new buys by preference.
     - **Order** — fewest games / fewest consoles / oldest-gen-first.
+  If the itinerary needs Pokémon Bank you don't have, the planner shows a
+  reality-check warning: Bank can no longer be newly downloaded (the 3DS eShop
+  closed in March 2023), so pre-Switch routes assume it's already installed.
   A demand-based greedy set-cover reaches full coverage (handling the Gen-3→4→5→
   Bank chains a naïve greedy would stall on). Below the plan: per-species verdicts
   (**Have / Ready / Need-a-game / Unknown / Event-only**, `GET /api/plan`) with a
@@ -240,16 +254,24 @@ from the local PokéAPI mirror** (see below), not live HTTP:
   `catchableOnSwitch`, `teraAvailable`, `originGames` come from the same tables.
 - **Curated overlay** (`src/obtainability/curated.ts`) now only for what the
   data can't say: per-game **shiny locks** (gen 6–9 starters + box legendaries),
-  shiny-locked-everywhere species, and a small static/gift supplement. Defaults
-  stay conservative — shiny is legal unless a curated entry says otherwise, so a
-  gap under-claims rather than misleads.
+  shiny-locked-everywhere species, a small static/gift supplement, and the
+  **mythical truth table** — dex membership lists mythicals in games where they
+  were event-only (Jirachi is in the Hoenn dex but was never catchable in gen 3),
+  so `AVAILABILITY_EXCLUSIONS` drops those listings, `STATIC_AVAILABILITY` adds
+  the real still-working routes (GO Special Research for Mew/Celebi/Jirachi, the
+  GO Mystery Box for Meltan/Melmetal, Keldeo's Crown Tundra quest), and
+  `UNOBTAINABLE_LEGIT` marks the truly event-only ones (Victini, Meloetta,
+  Genesect, Magearna, Marshadow, Zeraora, Zarude, Pecharunt) so they render as
+  **Event-only**, not as a catch stop. Defaults stay conservative — shiny is
+  legal unless a curated entry says otherwise, so a gap under-claims rather than
+  misleads.
 
 Version-group→game rollup lives in `src/obtainability/games.ts`
-(`VERSION_GROUP_TO_GAME`; DLC folds into its base game, GameCube/JP/unreleased
-groups are unmapped → "unknown"). Known limits (documented, not fabricated):
-obtainability is species-level (pokédex membership can't split Alolan vs
-Kantonian Raichu — regional-form exclusivity is future work), and a handful of
-National-dex-only event mons show empty availability rather than a guess.
+(`VERSION_GROUP_TO_GAME`; DLC folds into its base game — including Legends: Z-A's
+`legends-za` + `mega-dimension` (Mega Dimension DLC) → `za`; GameCube/JP/
+unreleased groups are unmapped → "unknown"). Known limits (documented, not
+fabricated): obtainability is species-level (pokédex membership can't split
+Alolan vs Kantonian Raichu — regional-form exclusivity is future work).
 
 The seed sources obtainability best-effort: if the mirror schema isn't populated
 yet it writes the catalogue and skips obtainability (leaving prior values), so
