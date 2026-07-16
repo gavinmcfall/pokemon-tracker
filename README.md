@@ -79,8 +79,12 @@ GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game group'
        catches reach Pokémon HOME: native | go | bank | chain | none | unknown)
 GET  /api/plan              -> { species:[{entryKey, verdict, via?, route?, needs?}],
        summary, acquisitions }  (living-dex planner: per-species verdict —
-       have|ready|need-game|unknown|event-only — given owned games + Bank, plus a
-       ranked buy-list of what unlocks the most)
+       have|ready|need-game|unknown|event-only — given owned games + Bank)
+GET  /api/acquire?mode=&rank= -> { steps:[{id,label,via,platform,generation,unlocks}],
+       missingTotal, alreadyReady, covered, leftover }  (the ordered shopping list
+       of games/services to acquire to complete the dex. mode = cartridge-only |
+       emulator-only | emu-first | cartridge-first; rank = fewest-games |
+       fewest-consoles | oldest-gen)
 GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game's
        catches reach Pokémon HOME: reach native|go|bank|chain|none|unknown,
        requiresBank, requiresGames (AND-of-ORs), human route string)
@@ -135,13 +139,20 @@ mock data + localStorage:
   it hides only *known* non-matches — a slot with no availability data stays
   visible (unknown, never a guess). Also tracks the **bridge services** (Pokémon
   Bank, HOME Premium) the planner needs, under a "Services" group.
-- **Planner** view (header toggle) — the living-dex planner (`GET /api/plan`,
-  `src/planner/`). Each species gets a verdict — **Have / Ready / Need-a-game /
-  Unknown / Event-only** — computed from availability + transfer topology + the
-  games you own + your Bank status. A game owned *only* via romhack is **not** a
-  HOME-legal route. Shows summary tiles, a ranked **best-next-acquisitions**
-  buy-list (which single game/service unlocks the most), and a filterable species
-  list; the detail sheet gains an ownership-aware "YOUR PLAN" line.
+- **Planner** view (header toggle) — the living-dex planner (`src/planner/`). Its
+  primary output is an **acquisition plan**: the ordered shopping list of
+  games/services to acquire so you can catch everything you're missing
+  (`GET /api/acquire`). Two levers:
+    - **Acquire** — how you get games: cartridge-only / emulator-only / emu-first
+      / cartridge-first. `-only` modes ignore your copies held in the other form;
+      `-first` modes keep everything you own and label new buys by preference.
+    - **Order** — fewest games / fewest consoles / oldest-gen-first.
+  A demand-based greedy set-cover reaches full coverage (handling the Gen-3→4→5→
+  Bank chains a naïve greedy would stall on). Below the plan: per-species verdicts
+  (**Have / Ready / Need-a-game / Unknown / Event-only**, `GET /api/plan`) with a
+  filterable list, and an ownership-aware "YOUR PLAN" line in the detail sheet.
+  A game owned *only* via romhack is **not** a HOME-legal route; Bank status gates
+  the pre-Switch routes.
 - **To Pokémon HOME** route line (detail sheet) — the simplest legit route into
   Pokémon HOME across the games a species is available in (`GET /api/transfer`,
   data in `src/obtainability/transfer.ts`): HOME-native (Switch line + GO), via

@@ -2,6 +2,8 @@ import type { EntryWithStatus, GameOwnership, OwnershipMethod } from '../types.j
 import { BANK_RELEASE_ID, GAME_BY_ID, RELEASE_BY_ID } from '../obtainability/games.js';
 import { transferFor, type TransferInfo } from '../obtainability/transfer.js';
 
+export type { GameOwnership };
+
 /**
  * Living-dex planner. For every species it decides how (or whether) you can get
  * it into Pokémon HOME given the games you own + your Bank status, and — across
@@ -228,4 +230,191 @@ function planAcquisitions(blocked: Routable[], initialOwned: Set<string>, initia
     remaining = remaining.filter((s) => !isReady(s, owned, bank));
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Acquisition planner — the "fastest shopping list to complete the dex"
+// ---------------------------------------------------------------------------
+
+/** How the owner intends to acquire games. */
+export type AcquireMode = 'cartridge-only' | 'emulator-only' | 'emu-first' | 'cartridge-first';
+/** How to rank/order the shopping list. */
+export type AcquireRank = 'fewest-games' | 'fewest-consoles' | 'oldest-gen';
+
+export const ACQUIRE_MODES: readonly AcquireMode[] = ['cartridge-only', 'emulator-only', 'emu-first', 'cartridge-first'];
+export const ACQUIRE_RANKS: readonly AcquireRank[] = ['fewest-games', 'fewest-consoles', 'oldest-gen'];
+
+// Which owned methods count as a usable route per mode. `digital` (Pokémon GO)
+// and mode-independent; romhack never counts. The `-only` modes ignore your
+// games held in the *other* physical form.
+const MODE_METHODS: Record<AcquireMode, OwnershipMethod[]> = {
+  'cartridge-only': ['cartridge', 'digital'],
+  'emulator-only': ['emulator', 'digital'],
+  'emu-first': ['cartridge', 'emulator', 'digital'],
+  'cartridge-first': ['cartridge', 'emulator', 'digital'],
+};
+
+export function ownedRouteGroupsForMode(ownership: GameOwnership[], mode: AcquireMode): Set<string> {
+  const allowed = MODE_METHODS[mode];
+  const groups = new Set<string>();
+  for (const o of ownership) {
+    if (!o.methods.some((m) => allowed.includes(m))) continue;
+    const release = RELEASE_BY_ID.get(o.gameId);
+    if (release && release.platform !== 'service') groups.add(release.versionGroup);
+  }
+  return groups;
+}
+
+/** How a recommended new acquisition would be obtained, given the mode. */
+export type AcquireVia = 'cartridge' | 'emulator' | 'install' | 'subscription';
+function acquireVia(id: string, mode: AcquireMode): AcquireVia {
+  if (id === BANK_RELEASE_ID) return 'subscription';
+  if (GAME_BY_ID.get(id)?.platform === 'mobile') return 'install'; // Pokémon GO
+  return mode === 'cartridge-only' || mode === 'cartridge-first' ? 'cartridge' : 'emulator';
+}
+
+export interface AcquireStep {
+  id: string; // version-group gameId, or 'bank'
+  label: string;
+  via: AcquireVia;
+  platform: string;
+  generation: number;
+  /** Missing species this step flips to Ready, in sequence. */
+  unlocks: number;
+}
+
+export interface AcquireLeftover { entryKey: string; dex: number; reason: 'event-only' | 'no data' | 'no known route' | 'needs more' }
+
+export interface AcquirePlan {
+  mode: AcquireMode;
+  rank: AcquireRank;
+  missingTotal: number;
+  /** Missing species already routable with the games you own (no acquisition needed). */
+  alreadyReady: number;
+  /** Missing species the shopping list makes routable. */
+  covered: number;
+  steps: AcquireStep[];
+  /** Missing species that no acquisition can route into HOME (event-only, unknown, …). */
+  leftover: AcquireLeftover[];
+}
+
+interface BlockedSpecies { entryKey: string; dex: number; gameIds: string[] }
+
+/** Cheapest missing requirement set across a species' routable availability, or null. */
+function cheapestMissing(gameIds: string[], owned: Set<string>, bank: boolean): string[][] | null {
+  let best: string[][] | null = null;
+  for (const gid of gameIds) {
+    const miss = routeMissing(transferFor(gid), owned, bank);
+    if (miss === null) continue;
+    if (best === null || miss.length < best.length) best = miss;
+  }
+  return best;
+}
+
+function candidateBetter(
+  a: { id: string; dem: number; gen: number; plat: string },
+  b: { id: string; dem: number; gen: number; plat: string },
+  rank: AcquireRank,
+  acquiredPlatforms: Set<string>,
+): boolean {
+  if (rank === 'oldest-gen') {
+    if (a.gen !== b.gen) return a.gen < b.gen;      // oldest first
+    return a.dem > b.dem;
+  }
+  if (rank === 'fewest-consoles') {
+    const aOn = acquiredPlatforms.has(a.plat), bOn = acquiredPlatforms.has(b.plat);
+    if (aOn !== bOn) return aOn;                     // reuse a platform already in the plan
+    if (a.dem !== b.dem) return a.dem > b.dem;
+    return a.gen < b.gen;
+  }
+  // fewest-games: most demanded first (satisfies the most species' requirements)
+  if (a.dem !== b.dem) return a.dem > b.dem;
+  return a.gen < b.gen;
+}
+
+/**
+ * Compute the ordered shopping list of games/services to acquire so every
+ * missing, routable species can reach HOME. A demand-based greedy set-cover:
+ * each round acquire the item most species still need (respecting the chosen
+ * rank), until nothing is left. Robust to multi-step chains (Gen 3 → 4 → 5 →
+ * Bank) that a coverage-only greedy would stall on.
+ */
+export function computeAcquisitionPlan(input: {
+  entries: EntryWithStatus[];
+  ownership: GameOwnership[];
+  mode: AcquireMode;
+  rank: AcquireRank;
+}): AcquirePlan {
+  const owned = ownedRouteGroupsForMode(input.ownership, input.mode);
+  let bank = hasBankFrom(input.ownership);
+
+  const missing = input.entries.filter((e) => !e.status?.caught);
+  const leftover: AcquireLeftover[] = [];
+  let alreadyReady = 0;
+  let remaining: BlockedSpecies[] = [];
+
+  for (const e of missing) {
+    const ob = e.obtainability;
+    if (!ob) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'no data' }); continue; }
+    if (ob.unobtainableLegit) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'event-only' }); continue; }
+    const gameIds = ob.availability.map((a) => a.gameId).filter((gid) => {
+      const r = transferFor(gid).reach;
+      return r !== 'unknown' && r !== 'none';
+    });
+    if (gameIds.length === 0) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'no known route' }); continue; }
+    if (gameIds.some((gid) => routeComplete(transferFor(gid), owned, bank))) { alreadyReady += 1; continue; }
+    remaining.push({ entryKey: e.entryKey, dex: e.dex, gameIds });
+  }
+  const blockedTotal = remaining.length;
+
+  const acquiredPlatforms = new Set<string>();
+  for (const g of owned) { const m = GAME_BY_ID.get(g); if (m) acquiredPlatforms.add(m.platform); }
+  const isReady = (s: BlockedSpecies) => s.gameIds.some((gid) => routeComplete(transferFor(gid), owned, bank));
+
+  const steps: AcquireStep[] = [];
+  for (let round = 0; round < 60 && remaining.length > 0; round += 1) {
+    const demand = new Map<string, number>();
+    for (const s of remaining) {
+      const miss = cheapestMissing(s.gameIds, owned, bank);
+      if (!miss) continue;
+      for (const item of new Set(miss.flat())) demand.set(item, (demand.get(item) ?? 0) + 1);
+    }
+    if (demand.size === 0) break;
+
+    let best: { id: string; dem: number; gen: number; plat: string } | null = null;
+    for (const [id, dem] of demand) {
+      const meta = id === BANK_RELEASE_ID ? { generation: 0, platform: 'service' } : GAME_BY_ID.get(id);
+      const cand = { id, dem, gen: meta?.generation ?? 99, plat: meta?.platform ?? 'x' };
+      if (!best || candidateBetter(cand, best, input.rank, acquiredPlatforms)) best = cand;
+    }
+    if (!best) break;
+
+    if (best.id === BANK_RELEASE_ID) bank = true; else owned.add(best.id);
+    acquiredPlatforms.add(best.plat);
+    const before = remaining.length;
+    remaining = remaining.filter((s) => !isReady(s));
+    steps.push({
+      id: best.id,
+      label: best.id === BANK_RELEASE_ID ? 'Pokémon Bank' : (GAME_BY_ID.get(best.id)?.label ?? best.id),
+      via: acquireVia(best.id, input.mode),
+      platform: best.plat,
+      generation: best.gen,
+      unlocks: before - remaining.length,
+    });
+  }
+
+  // Anything still unmet after the loop (shouldn't happen for routable species).
+  for (const s of remaining) leftover.push({ entryKey: s.entryKey, dex: s.dex, reason: 'needs more' });
+
+  if (input.rank === 'oldest-gen') steps.sort((a, b) => a.generation - b.generation || a.label.localeCompare(b.label));
+
+  return {
+    mode: input.mode,
+    rank: input.rank,
+    missingTotal: missing.length,
+    alreadyReady,
+    covered: blockedTotal - remaining.length,
+    steps,
+    leftover,
+  };
 }

@@ -322,6 +322,29 @@ describe('GET /api/plan', () => {
   });
 });
 
+describe('GET /api/acquire', () => {
+  const obFixture = (gameIds: string[]) => ({
+    availability: gameIds.map((gameId) => ({ gameId, label: gameId, platform: 'switch', method: 'wild', shinyPossible: true })),
+    gmaxCapable: false, teraAvailable: false, catchableOnSwitch: false, shinyLegalSomewhere: true,
+    unobtainableLegit: false, genderVisualDiff: false, shinyLockedIn: [], originGames: [],
+  });
+
+  it('returns a shopping list tuned by mode + rank', async () => {
+    await store.replaceObtainability([{ entryKey: '0006-default-male', obtainability: obFixture(['sv']) }]);
+    const emu = await json(await get('/api/acquire?mode=emu-first&rank=fewest-games'));
+    expect(emu.steps[0]).toMatchObject({ id: 'sv', via: 'emulator', unlocks: 1 });
+    expect(emu.missingTotal).toBe(4);
+
+    const cart = await json(await get('/api/acquire?mode=cartridge-only&rank=fewest-games'));
+    expect(cart.steps[0]).toMatchObject({ id: 'sv', via: 'cartridge' });
+  });
+
+  it('validates mode and rank', async () => {
+    expect((await get('/api/acquire?mode=nope')).status).toBe(400);
+    expect((await get('/api/acquire?rank=nope')).status).toBe(400);
+  });
+});
+
 describe('GET /api/transfer', () => {
   it('returns the HOME transfer topology keyed by gameId', async () => {
     const t = await json(await get('/api/transfer'));
