@@ -273,71 +273,91 @@ function acquireVia(id: string, mode: AcquireMode): AcquireVia {
   return mode === 'cartridge-only' || mode === 'cartridge-first' ? 'cartridge' : 'emulator';
 }
 
+/**
+ * One stop on the completion itinerary — a game to play (owned or to acquire),
+ * with the exact species to catch there. `prereq` steps (Pokémon Bank, a chain
+ * intermediate) are transfer requirements, not catch stops.
+ */
 export interface AcquireStep {
   id: string; // version-group gameId, or 'bank'
   label: string;
-  via: AcquireVia;
   platform: string;
   generation: number;
-  /** Missing species this step flips to Ready, in sequence. */
-  unlocks: number;
+  /** You already own a usable copy (in this mode) — just play it. */
+  owned: boolean;
+  /** How to acquire it when not owned (null when owned). */
+  via: AcquireVia | null;
+  /** Species to catch at this stop. */
+  catchCount: number;
+  entryKeys: string[];
+  /** A transfer requirement (Bank / chain intermediate), not a place you catch. */
+  prereq: boolean;
 }
 
-export interface AcquireLeftover { entryKey: string; dex: number; reason: 'event-only' | 'no data' | 'no known route' | 'needs more' }
+export interface AcquireLeftover { entryKey: string; dex: number; reason: 'event-only' | 'no data' | 'no known route' }
 
 export interface AcquirePlan {
   mode: AcquireMode;
   rank: AcquireRank;
   missingTotal: number;
-  /** Missing species already routable with the games you own (no acquisition needed). */
-  alreadyReady: number;
-  /** Missing species the shopping list makes routable. */
-  covered: number;
+  /** Missing species the itinerary catches (assigned to a stop). */
+  coverable: number;
+  /** Ordered stops: transfer prereqs first, then catch stops. */
   steps: AcquireStep[];
-  /** Missing species that no acquisition can route into HOME (event-only, unknown, …). */
+  /** Missing species with no known catchable+routable path (event-only, unknown). */
   leftover: AcquireLeftover[];
 }
 
-interface BlockedSpecies { entryKey: string; dex: number; gameIds: string[] }
-
-/** Cheapest missing requirement set across a species' routable availability, or null. */
-function cheapestMissing(gameIds: string[], owned: Set<string>, bank: boolean): string[][] | null {
-  let best: string[][] | null = null;
-  for (const gid of gameIds) {
-    const miss = routeMissing(transferFor(gid), owned, bank);
-    if (miss === null) continue;
-    if (best === null || miss.length < best.length) best = miss;
-  }
-  return best;
+// Route "simplicity" tier — prefer catching a species in a game that reaches
+// HOME directly over one that needs Bank or a transfer chain.
+function tierOf(reach: string): number {
+  if (reach === 'native' || reach === 'go') return 0;
+  if (reach === 'bank') return 1;
+  if (reach === 'chain') return 2;
+  return 99; // unknown | none — not catchable-into-HOME
 }
 
-function candidateBetter(
-  a: { id: string; dem: number; gen: number; plat: string },
-  b: { id: string; dem: number; gen: number; plat: string },
+function stepFor(id: string, entryKeys: string[], owned: Set<string>, mode: AcquireMode, prereq: boolean): AcquireStep {
+  const isBank = id === BANK_RELEASE_ID;
+  const meta = isBank ? { label: 'Pokémon Bank', platform: 'service', generation: 0 } : GAME_BY_ID.get(id);
+  const isOwned = !isBank && owned.has(id);
+  return {
+    id,
+    label: meta?.label ?? id,
+    platform: meta?.platform ?? 'x',
+    generation: meta?.generation ?? 99,
+    owned: isOwned,
+    via: isOwned ? null : acquireVia(id, mode),
+    catchCount: entryKeys.length,
+    entryKeys,
+    prereq,
+  };
+}
+
+function coverBetter(
+  a: { n: number; owned: boolean; gen: number; plat: string },
+  b: { n: number; owned: boolean; gen: number; plat: string },
   rank: AcquireRank,
-  acquiredPlatforms: Set<string>,
+  usedPlatforms: Set<string>,
 ): boolean {
-  if (rank === 'oldest-gen') {
-    if (a.gen !== b.gen) return a.gen < b.gen;      // oldest first
-    return a.dem > b.dem;
-  }
   if (rank === 'fewest-consoles') {
-    const aOn = acquiredPlatforms.has(a.plat), bOn = acquiredPlatforms.has(b.plat);
-    if (aOn !== bOn) return aOn;                     // reuse a platform already in the plan
-    if (a.dem !== b.dem) return a.dem > b.dem;
-    return a.gen < b.gen;
+    const aOn = usedPlatforms.has(a.plat), bOn = usedPlatforms.has(b.plat);
+    if (aOn !== bOn) return aOn; // stay on a console already in the plan
   }
-  // fewest-games: most demanded first (satisfies the most species' requirements)
-  if (a.dem !== b.dem) return a.dem > b.dem;
-  return a.gen < b.gen;
+  if (a.n !== b.n) return a.n > b.n;         // cover the most new species
+  if (a.owned !== b.owned) return a.owned;   // prefer a game you already own
+  return a.gen < b.gen;                       // deterministic
 }
 
 /**
- * Compute the ordered shopping list of games/services to acquire so every
- * missing, routable species can reach HOME. A demand-based greedy set-cover:
- * each round acquire the item most species still need (respecting the chosen
- * rank), until nothing is left. Robust to multi-step chains (Gen 3 → 4 → 5 →
- * Bank) that a coverage-only greedy would stall on.
+ * Build the completion itinerary: the minimal ordered set of games to play —
+ * owned **and** to-acquire — each with the exact species to catch there, so you
+ * cover every missing, routable species. A greedy set-cover picks the game that
+ * catches the most still-uncaught species each round (respecting the rank), and
+ * assigns those species to it. Any Bank / chain-intermediate a chosen game needs
+ * for the HOME transfer is added as a `prereq` step. Each species is caught in
+ * its simplest-tier game (direct over Bank over chain), so the itinerary is
+ * dominated by modern one-stop games rather than transfer chains.
  */
 export function computeAcquisitionPlan(input: {
   entries: EntryWithStatus[];
@@ -346,74 +366,78 @@ export function computeAcquisitionPlan(input: {
   rank: AcquireRank;
 }): AcquirePlan {
   const owned = ownedRouteGroupsForMode(input.ownership, input.mode);
-  let bank = hasBankFrom(input.ownership);
+  const hasBank = hasBankFrom(input.ownership);
 
   const missing = input.entries.filter((e) => !e.status?.caught);
   const leftover: AcquireLeftover[] = [];
-  let alreadyReady = 0;
-  let remaining: BlockedSpecies[] = [];
+  const speciesGames = new Map<string, string[]>(); // entryKey -> candidate games (simplest tier)
 
   for (const e of missing) {
     const ob = e.obtainability;
     if (!ob) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'no data' }); continue; }
     if (ob.unobtainableLegit) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'event-only' }); continue; }
-    const gameIds = ob.availability.map((a) => a.gameId).filter((gid) => {
-      const r = transferFor(gid).reach;
-      return r !== 'unknown' && r !== 'none';
-    });
-    if (gameIds.length === 0) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'no known route' }); continue; }
-    if (gameIds.some((gid) => routeComplete(transferFor(gid), owned, bank))) { alreadyReady += 1; continue; }
-    remaining.push({ entryKey: e.entryKey, dex: e.dex, gameIds });
-  }
-  const blockedTotal = remaining.length;
-
-  const acquiredPlatforms = new Set<string>();
-  for (const g of owned) { const m = GAME_BY_ID.get(g); if (m) acquiredPlatforms.add(m.platform); }
-  const isReady = (s: BlockedSpecies) => s.gameIds.some((gid) => routeComplete(transferFor(gid), owned, bank));
-
-  const steps: AcquireStep[] = [];
-  for (let round = 0; round < 60 && remaining.length > 0; round += 1) {
-    const demand = new Map<string, number>();
-    for (const s of remaining) {
-      const miss = cheapestMissing(s.gameIds, owned, bank);
-      if (!miss) continue;
-      for (const item of new Set(miss.flat())) demand.set(item, (demand.get(item) ?? 0) + 1);
+    let minTier = 99;
+    const byTier = new Map<number, Set<string>>();
+    for (const a of ob.availability) {
+      const t = tierOf(transferFor(a.gameId).reach);
+      if (t === 99) continue;
+      (byTier.get(t) ?? byTier.set(t, new Set()).get(t)!).add(a.gameId);
+      if (t < minTier) minTier = t;
     }
-    if (demand.size === 0) break;
+    if (minTier === 99) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'no known route' }); continue; }
+    speciesGames.set(e.entryKey, [...byTier.get(minTier)!]);
+  }
 
-    let best: { id: string; dem: number; gen: number; plat: string } | null = null;
-    for (const [id, dem] of demand) {
-      const meta = id === BANK_RELEASE_ID ? { generation: 0, platform: 'service' } : GAME_BY_ID.get(id);
-      const cand = { id, dem, gen: meta?.generation ?? 99, plat: meta?.platform ?? 'x' };
-      if (!best || candidateBetter(cand, best, input.rank, acquiredPlatforms)) best = cand;
+  // Greedy set-cover: each round, the game catching the most still-uncovered species.
+  const uncovered = new Set(speciesGames.keys());
+  const usedPlatforms = new Set<string>();
+  for (const g of owned) { const m = GAME_BY_ID.get(g); if (m) usedPlatforms.add(m.platform); }
+
+  const catchStops: { id: string; entryKeys: string[] }[] = [];
+  while (uncovered.size > 0) {
+    const cover = new Map<string, string[]>();
+    for (const ek of uncovered) for (const g of speciesGames.get(ek)!) (cover.get(g) ?? cover.set(g, []).get(g)!).push(ek);
+    let best: { id: string; n: number; owned: boolean; gen: number; plat: string } | null = null;
+    for (const [id, eks] of cover) {
+      const m = GAME_BY_ID.get(id);
+      const cand = { id, n: eks.length, owned: owned.has(id), gen: m?.generation ?? 99, plat: m?.platform ?? 'x' };
+      if (!best || coverBetter(cand, best, input.rank, usedPlatforms)) best = cand;
     }
     if (!best) break;
-
-    if (best.id === BANK_RELEASE_ID) bank = true; else owned.add(best.id);
-    acquiredPlatforms.add(best.plat);
-    const before = remaining.length;
-    remaining = remaining.filter((s) => !isReady(s));
-    steps.push({
-      id: best.id,
-      label: best.id === BANK_RELEASE_ID ? 'Pokémon Bank' : (GAME_BY_ID.get(best.id)?.label ?? best.id),
-      via: acquireVia(best.id, input.mode),
-      platform: best.plat,
-      generation: best.gen,
-      unlocks: before - remaining.length,
-    });
+    for (const ek of cover.get(best.id)!) uncovered.delete(ek);
+    usedPlatforms.add(best.plat);
+    // entryKeys sort ≈ dex order (they start with the zero-padded dex number).
+    catchStops.push({ id: best.id, entryKeys: cover.get(best.id)!.sort((a, b) => a.localeCompare(b)) });
   }
 
-  // Anything still unmet after the loop (shouldn't happen for routable species).
-  for (const s of remaining) leftover.push({ entryKey: s.entryKey, dex: s.dex, reason: 'needs more' });
+  if (input.rank === 'oldest-gen') {
+    catchStops.sort((a, b) => (GAME_BY_ID.get(a.id)?.generation ?? 99) - (GAME_BY_ID.get(b.id)?.generation ?? 99));
+  }
 
-  if (input.rank === 'oldest-gen') steps.sort((a, b) => a.generation - b.generation || a.label.localeCompare(b.label));
+  // Transfer prerequisites for the chosen games (Bank, chain intermediates).
+  let needBank = false;
+  const prereqGames = new Set<string>();
+  for (const stop of catchStops) {
+    const info = transferFor(stop.id);
+    if ((info.reach === 'bank' || info.reach === 'chain') && !hasBank) needBank = true;
+    if (info.reach === 'chain') {
+      for (const hop of info.requiresGames) {
+        const rep = hop[0];
+        if (rep && !hop.some((g) => owned.has(g))) prereqGames.add(rep);
+      }
+    }
+  }
+
+  const steps: AcquireStep[] = [];
+  if (needBank) steps.push(stepFor(BANK_RELEASE_ID, [], owned, input.mode, true));
+  for (const g of prereqGames) steps.push(stepFor(g, [], owned, input.mode, true));
+  for (const stop of catchStops) steps.push(stepFor(stop.id, stop.entryKeys, owned, input.mode, false));
 
   return {
     mode: input.mode,
     rank: input.rank,
     missingTotal: missing.length,
-    alreadyReady,
-    covered: blockedTotal - remaining.length,
+    coverable: catchStops.reduce((n, s) => n + s.entryKeys.length, 0),
     steps,
     leftover,
   };

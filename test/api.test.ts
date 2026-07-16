@@ -329,14 +329,17 @@ describe('GET /api/acquire', () => {
     unobtainableLegit: false, genderVisualDiff: false, shinyLockedIn: [], originGames: [],
   });
 
-  it('returns a shopping list tuned by mode + rank', async () => {
+  it('returns a completion itinerary tuned by mode + rank', async () => {
     await store.replaceObtainability([{ entryKey: '0006-default-male', obtainability: obFixture(['sv']) }]);
     const emu = await json(await get('/api/acquire?mode=emu-first&rank=fewest-games'));
-    expect(emu.steps[0]).toMatchObject({ id: 'sv', via: 'emulator', unlocks: 1 });
+    const stop = emu.steps.find((s: { id: string }) => s.id === 'sv');
+    expect(stop).toMatchObject({ id: 'sv', via: 'emulator', owned: false, catchCount: 1, prereq: false });
+    expect(stop.entryKeys).toEqual(['0006-default-male']);
     expect(emu.missingTotal).toBe(4);
+    expect(emu.coverable).toBe(1);
 
     const cart = await json(await get('/api/acquire?mode=cartridge-only&rank=fewest-games'));
-    expect(cart.steps[0]).toMatchObject({ id: 'sv', via: 'cartridge' });
+    expect(cart.steps.find((s: { id: string }) => s.id === 'sv')).toMatchObject({ id: 'sv', via: 'cartridge' });
   });
 
   it('validates mode and rank', async () => {
