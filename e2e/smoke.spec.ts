@@ -261,26 +261,23 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   const planner = page.locator('#planner');
   await expect(planner).toBeVisible();
   await expect(planner).toContainText('LIVING-DEX PLANNER');
-  await expect(planner).toContainText('ACQUISITION PLAN');
+  await expect(planner).toContainText('COMPLETION PLAN');
 
-  // shopping list: acquiring Let's Go (lgpe) covers Charizard default; default mode
-  // is emu-first, so the step recommends EMULATE.
+  // itinerary: Let's Go (lgpe) is a catch stop for Charizard default; default mode
+  // is emu-first and it's unowned, so the stop is tagged EMULATE.
   const lgpeStep = planner.locator('.acq-step[data-id="lgpe"]');
   await expect(lgpeStep).toBeVisible();
   await expect(lgpeStep).toContainText("Let's Go");
   await expect(lgpeStep).toContainText('EMULATE');
 
-  // switching to Cartridge-only re-labels the acquisition as a cartridge buy
+  // tapping the stop shows exactly what to catch there (Charizard default)
+  await lgpeStep.click();
+  await expect(planner).toContainText("CATCH IN LET'S GO");
+  await expect(planner.locator('.planner-row[data-entry-key="0006-default-male"]')).toBeVisible();
+
+  // switching to Cartridge-only re-labels the unowned stop as a cartridge buy
   await planner.locator('.acquire button[data-mode="cartridge-only"]').click();
   await expect(planner.locator('.acq-step[data-id="lgpe"]')).toContainText('BUY CART');
-
-  // summary tiles: 1 Have (caught Vivillon), 2 Need-a-game (Charizard default + mega_x)
-  await expect(planner.locator('.plan-tile[data-verdict="have"]')).toContainText('1');
-  await expect(planner.locator('.plan-tile[data-verdict="need-game"]')).toContainText('2');
-
-  // filter to Need-a-game → Charizard default is listed
-  await planner.locator('.plan-tile[data-verdict="need-game"]').click();
-  await expect(planner.locator('.planner-row[data-entry-key="0006-default-male"]')).toBeVisible();
 
   // My Games: Bank is a service (Active toggle, no cartridge); own Let's Go Pikachu
   await page.locator('#games-btn').click();
@@ -290,10 +287,9 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   await modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]').click();
   await page.keyboard.press('Escape');
 
-  // Charizard default now routes into HOME with a game you own → Ready count rises,
-  // and Let's Go drops off the shopping list.
+  // Now you own Let's Go → it stays as a stop but flips to OWN (still where you catch it)
+  await expect(planner.locator('.acq-step[data-id="lgpe"]')).toContainText('OWN');
   await expect(planner.locator('.plan-tile[data-verdict="ready"]')).toContainText('1');
-  await expect(planner.locator('.acq-step[data-id="lgpe"]')).toHaveCount(0);
 
   // back to the dex
   await page.locator('#view-btn').click();
