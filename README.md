@@ -77,9 +77,11 @@ POST /api/ownership         { gameId, methods:[…], notes? } -> GameOwnership
         romhack for consoles, digital for mobile/GO)
 GET  /api/transfer          -> { [gameId]: TransferInfo }  (how each game group's
        catches reach Pokémon HOME: native | go | bank | chain | none | unknown)
-GET  /api/plan?scope=       -> { species:[{entryKey, verdict, via?, route?, needs?}],
-       summary, acquisitions, scope, phase? }  (living-dex planner: per-species
-       verdict — have|ready|need-game|unknown|event-only — given owned games + Bank)
+GET  /api/plan?scope=&gender= -> { species:[{entryKey, verdict, via?, route?, needs?}],
+       summary, acquisitions, scope, gender, phase? }  (living-dex planner: per-
+       species verdict — have|ready|need-game|unknown|event-only — given owned
+       games + Bank. gender = all | distinct: `distinct` collapses ♂/♀ pairs
+       except the ~101 visually gender-dimorphic species)
 GET  /api/acquire?mode=&rank=&scope= -> { steps:[{id,label,platform,generation,owned,
        via,catchCount,entryKeys,prereq}], missingTotal, coverable, leftover, scope,
        phase? }  (the completion itinerary: the ordered games to play — owned AND
@@ -116,6 +118,13 @@ mock data + localStorage:
   caught slot when any slot of the group is caught (so the species reads as
   done regardless of which gender/form you banked). Display-only: it never
   changes what's stored, and the planner's GOAL is chosen separately.
+- **GENDERS preference** (one setting, shared by the dex grid and the planner
+  goal — chips in both places) — **All** keeps a ♂ and ♀ slot for every
+  dual-gender species (807 of 1,025); **Distinct only** collapses each ♂/♀
+  pair to one slot unless the species is visually gender-dimorphic
+  (`has_gender_differences` from the games' own data — ~101 species like
+  Pikachu, Hippowdon). Data-driven, not a guess: the identical-looking pairs
+  it drops have no female sprite because the games render them identically.
 - **Progress mosaic** — one bar segment per primary type that has returned to the
   dex, coloured by type.
 - **Filters** — generation chips, All/Needed/Caught, a multi-select type row, and

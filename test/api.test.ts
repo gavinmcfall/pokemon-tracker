@@ -334,6 +334,14 @@ describe('GET /api/plan', () => {
 
     expect((await get('/api/plan?scope=everything')).status).toBe(400);
   });
+
+  it('?gender= is validated and echoed (contract fixture has no collapsible pairs)', async () => {
+    const body = await json(await get('/api/plan?gender=distinct'));
+    expect(body.gender).toBe('distinct');
+    expect(body.summary.total).toBe(4); // no ♂/♀ pair in the fixture — nothing collapses
+    expect((await get('/api/plan?gender=males-only')).status).toBe(400);
+    expect((await get('/api/acquire?gender=males-only')).status).toBe(400);
+  });
 });
 
 describe('GET /api/acquire', () => {
