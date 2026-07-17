@@ -237,6 +237,17 @@ Policy encoded in `src/seed/expand.ts` (all unit-tested against real PokéAPI da
 - Gender-as-variety species (Meowstic, Indeedee, Basculegion, Oinkologne) and
   gender-as-form species (Frillish, Pyroar) collapse into the gender dimension
   instead of becoming fake forms.
+- Curated **fixed-gender event forms** (`FIXED_GENDER_FORMS` in
+  `src/obtainability/curated.ts`) override the species gender ratio: all 8 cap
+  Pikachu are ♂-only, Cosplay Pikachu and its costumes ♀-only, Ash-Greninja
+  ♂-only (Bulbapedia-verified) — the ratio alone would fabricate slots no game
+  can produce. Only documented locks are asserted; uncertain event genders
+  (e.g. Fancy Vivillon) stay unlocked.
+- **`SEED_PRUNE=1`** deletes DB entries the catalogue no longer produces (after
+  a curated correction like the above, a tier change, or an upstream removal) —
+  their status/specimen/obtainability rows cascade away. Off by default since
+  pruning discards any catch status on those slots; the seed logs the stale
+  keys either way.
 - `is_cosmetic` = a sibling form that doesn't even change typing (Vivillon
   patterns yes; Arceus plates no). The effectively-unobtainable Poké Ball
   Vivillon is listed and flagged, per the "every variant" goal.

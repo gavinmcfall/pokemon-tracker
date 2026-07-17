@@ -219,6 +219,21 @@ describe('expandSpecies on real PokéAPI fixtures (spec §8 edge cases)', () => 
     expect(slugs.has('gmax')).toBe(true);
   });
 
+  it('Pikachu: curated gender locks — caps are ♂-only, cosplay ♀-only, base keeps both', () => {
+    const entries = expandSpecies(bundleFor('pikachu', 'full'), 'full');
+    const genders = (slug: string) => entries.filter((e) => e.formSlug === slug).map((e) => e.gender).sort();
+    // "Pikachu in a cap is always male" (Bulbapedia) — no fabricated females.
+    for (const cap of ['original_cap', 'hoenn_cap', 'sinnoh_cap', 'unova_cap', 'kalos_cap', 'alola_cap', 'partner_cap', 'world_cap']) {
+      expect(genders(cap), cap).toEqual(['male']);
+    }
+    // "Cosplay Pikachu is always female" — costumes included.
+    for (const costume of ['cosplay', 'rock_star', 'belle', 'pop_star', 'phd', 'libre']) {
+      expect(genders(costume), costume).toEqual(['female']);
+    }
+    // Unlocked forms still follow the species ratio at full tier.
+    expect(genders('default')).toEqual(['female', 'male']);
+  });
+
   it('entry keys are unique within every fixture species at every tier', () => {
     for (const tier of ['species', 'forms', 'full'] as const) {
       for (const sp of ['charizard', 'unown', 'vivillon', 'alcremie', 'meowstic', 'minior', 'pikachu', 'arceus', 'pichu', 'genesect']) {

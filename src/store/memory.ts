@@ -31,6 +31,18 @@ export class MemoryStore implements Store {
     return result;
   }
 
+  async deleteEntries(entryKeys: string[]): Promise<number> {
+    let removed = 0;
+    for (const key of entryKeys) {
+      if (this.entries.delete(key)) removed += 1;
+      // parity with PgStore's ON DELETE CASCADE
+      this.statuses.delete(key);
+      this.specimens.delete(key);
+      this.obtainabilities.delete(key);
+    }
+    return removed;
+  }
+
   async listEntries(filters: EntryFilters): Promise<EntryWithStatus[]> {
     const q = filters.q?.toLowerCase();
     return [...this.entries.values()]

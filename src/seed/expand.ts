@@ -1,5 +1,6 @@
 import type { Entry, Gender, SeedTier } from '../types.js';
 import { entryKeyOf } from '../types.js';
+import { FIXED_GENDER_FORMS } from '../obtainability/curated.js';
 import type { RawForm, RawPokemon, RawSpecies } from './pokeapi.js';
 
 /**
@@ -204,7 +205,11 @@ export function expandSpecies(bundle: SpeciesBundle, tier: SeedTier): Entry[] {
   const entries: Entry[] = [];
   const seen = new Set<string>();
   for (const slot of slots) {
-    const genders = slot.genderOverride ? [slot.genderOverride] : speciesGenders;
+    // Curated gender locks first (cap Pikachu is always male — the species
+    // ratio would fabricate a female that no game can produce), then the
+    // slug-encoded gender varieties, then the species ratio.
+    const fixed = FIXED_GENDER_FORMS[dex]?.[slot.formSlug];
+    const genders = fixed ? [fixed] : slot.genderOverride ? [slot.genderOverride] : speciesGenders;
     for (const gender of genders) {
       const entryKey = entryKeyOf(dex, slot.formSlug, gender);
       if (seen.has(entryKey)) throw new Error(`duplicate entry key ${entryKey} while expanding ${species.name}`);

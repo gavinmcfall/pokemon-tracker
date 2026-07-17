@@ -213,6 +213,13 @@ export class PgStore implements Store {
     }
   }
 
+  async deleteEntries(entryKeys: string[]): Promise<number> {
+    if (entryKeys.length === 0) return 0;
+    // status / specimen / obtainability rows go with them (ON DELETE CASCADE).
+    const res = await this.pool.query('delete from entries where entry_key = any($1)', [entryKeys]);
+    return res.rowCount ?? 0;
+  }
+
   async listEntries(filters: EntryFilters): Promise<EntryWithStatus[]> {
     const where: string[] = [];
     const params: unknown[] = [];

@@ -131,6 +131,24 @@ export const STATIC_AVAILABILITY: Record<number, StaticAvailability[]> = {
   1008: [{ gameId: 'sv', method: 'static' }],
 };
 
+/**
+ * Event forms locked to a single gender in every game — the seed's expansion
+ * derives genders from the species ratio, which fabricates impossible slots for
+ * these (a female cap Pikachu does not exist). `dex -> formSlug -> gender`,
+ * formSlug as the expansion emits it (underscores). Sources (Bulbapedia):
+ * "Pikachu in a cap is always male"; "Cosplay Pikachu is always female";
+ * "Ash-Greninja … is always male". Only assert the well-documented locks —
+ * forms with random/unknown event genders (e.g. Fancy Vivillon) stay unlocked.
+ */
+export const FIXED_GENDER_FORMS: Record<number, Record<string, 'male' | 'female'>> = {
+  25: {
+    original_cap: 'male', hoenn_cap: 'male', sinnoh_cap: 'male', unova_cap: 'male',
+    kalos_cap: 'male', alola_cap: 'male', partner_cap: 'male', world_cap: 'male',
+    cosplay: 'female', rock_star: 'female', belle: 'female', pop_star: 'female', phd: 'female', libre: 'female',
+  },
+  658: { ash: 'male', battle_bond: 'male' }, // Ash-Greninja (and its Battle Bond base) is always male
+};
+
 /** Starter lines are gift-obtained in their debut region's games. dex -> gameIds. */
 export const STARTER_GIFTS: Record<number, string[]> = {
   // Gen 6 Kalos
