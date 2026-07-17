@@ -311,7 +311,7 @@ test('goal scope drives the plan only; the dex has its own VIEW consolidation', 
   // Switch the GOAL to Phased → phase 1 is species (Mega X leaves the PLAN)…
   await planner.locator('button[data-scope="phased"]').click();
   await expect(planner.locator('[data-role="goal-progress"]')).toContainText('PHASE 1/3 — SPECIES');
-  await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/3 caught'); // Vivillon counts
+  await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/5 caught'); // Vivillon, of 5 species
 
   // …but the DEX GRID is untouched: still every slot.
   await page.locator('#view-btn').click();
@@ -326,6 +326,27 @@ test('goal scope drives the plan only; the dex has its own VIEW consolidation', 
 
   await page.locator('#view-chips button[data-view="all"]').click();
   await expect(page.locator(gridButton)).toHaveCount(3);
+});
+
+test('gender preference: Distinct only collapses identical pairs, keeps dimorphic ones', async ({ page }) => {
+  // Gen IV fixture: Turtwig ♂/♀ (identical) + Hippopotas ♂/♀ (visually distinct).
+  await page.locator('.gen-chips button[data-gen="4"]').click();
+  await expect(page.locator(gridButton)).toHaveCount(4);
+
+  await page.locator('#gender-chips button[data-gender="distinct"]').click();
+  await expect(page.locator(gridButton)).toHaveCount(3); // Turtwig collapses to one slot
+  await expect(page.locator(`${gridButton}[data-entry-key="0387-default-female"]`)).toHaveCount(0);
+  await expect(page.locator(`${gridButton}[data-entry-key="0449-default-male"]`)).toBeVisible();
+  await expect(page.locator(`${gridButton}[data-entry-key="0449-default-female"]`)).toBeVisible();
+  await expect(page.locator('#total')).toHaveText('/ 3');
+
+  // The preference is shared with the planner goal: 8 slots → 7.
+  await page.locator('#view-btn').click();
+  const planner = page.locator('#planner');
+  await expect(planner.locator('button[data-gender="distinct"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/7 caught');
+  await planner.locator('button[data-gender="all"]').click();
+  await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/8 caught');
 });
 
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {

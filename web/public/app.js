@@ -117,6 +117,15 @@ const DEX_VIEWS = [
 ];
 const DEX_VIEW_KEY = 'livingdex-dex-view';
 
+// Gender preference — one setting shared by the dex grid and the planner goal.
+// "Distinct only" collapses ♂/♀ pairs unless the species is visually
+// gender-dimorphic (has_gender_differences from the games' data).
+const GENDER_PREFS = [
+  { key: 'all', label: 'All' },
+  { key: 'distinct', label: 'Distinct only' },
+];
+const GENDER_KEY = 'livingdex-gender-pref';
+
 // How a game's catches reach Pokémon HOME. Rank = simplicity (lower is simpler),
 // used to pick the easiest route among the games a species is available in.
 const REACH = {
@@ -155,24 +164,47 @@ const state = {
   goalScope: 'phased', // planner GoalScope — what the PLAN counts toward "done"
   planPhase: null,     // {n, of, label, caught, total} from the API when scope is phased
   dexView: 'all',      // dex grid consolidation — display only, independent of goalScope
+  genderPref: 'all',   // 'all' | 'distinct' — shared by the grid and the plan
   theme: 'auto',
 };
 
 /* ---------- dex view consolidation (grouping mirrors src/planner/scope.ts) ---------- */
 // Cache of the visible entryKey set for the dex VIEW; null = every slot shows.
-let scopeCache = { view: null, keys: null };
-function invalidateScope() { scopeCache = { view: null, keys: null }; }
+let scopeCache = { view: null, gender: null, keys: null };
+function invalidateScope() { scopeCache = { view: null, gender: null, keys: null }; }
 
-function scopeRepresentatives(regional) {
-  const groups = new Map();
+const GENDER_RANK = { male: 0, genderless: 1, female: 2 };
+
+/** Slot universe under the gender preference (mirrors scope.ts slotEntries). */
+function slotList() {
+  if (state.genderPref !== 'distinct') return state.entries;
+  const out = [];
+  const pairs = new Map();
   for (const e of state.entries) {
+    if ((e.gender !== 'male' && e.gender !== 'female') || e.genderVisualDiff) { out.push(e); continue; }
+    const key = `${e.dex}:${e.formSlug}`;
+    const arr = pairs.get(key);
+    if (arr) arr.push(e); else pairs.set(key, [e]);
+  }
+  for (const members of pairs.values()) {
+    members.sort((a, b) =>
+      Number(isCaught(b)) - Number(isCaught(a)) ||
+      (GENDER_RANK[a.gender] ?? 9) - (GENDER_RANK[b.gender] ?? 9) ||
+      a.entryKey.localeCompare(b.entryKey));
+    out.push(members[0]);
+  }
+  return out;
+}
+
+function scopeRepresentatives(slots, regional) {
+  const groups = new Map();
+  for (const e of slots) {
     const isReg = isRegionalForm(e.formSlug);
     if (isReg && !regional) continue;
     const key = isReg ? `${e.dex}:${e.formSlug}` : String(e.dex);
     const arr = groups.get(key);
     if (arr) arr.push(e); else groups.set(key, [e]);
   }
-  const GENDER_RANK = { male: 0, genderless: 1, female: 2 };
   const reps = [];
   for (const members of groups.values()) {
     members.sort((a, b) =>
@@ -185,14 +217,18 @@ function scopeRepresentatives(regional) {
   return reps;
 }
 
-/** The entryKey Set the dex VIEW shows (null = every slot). */
+/** The entryKey Set the dex VIEW shows (null = every slot, all genders). */
 function scopeKeys() {
-  if (scopeCache.view === state.dexView) return scopeCache.keys;
+  if (scopeCache.view === state.dexView && scopeCache.gender === state.genderPref) return scopeCache.keys;
   const view = state.dexView;
-  const keys = view === 'species' || view === 'species-regional'
-    ? new Set(scopeRepresentatives(view === 'species-regional').map((e) => e.entryKey))
-    : null;
-  scopeCache = { view, keys };
+  const slots = slotList();
+  let keys = null;
+  if (view === 'species' || view === 'species-regional') {
+    keys = new Set(scopeRepresentatives(slots, view === 'species-regional').map((e) => e.entryKey));
+  } else if (state.genderPref === 'distinct') {
+    keys = new Set(slots.map((e) => e.entryKey));
+  }
+  scopeCache = { view, gender: state.genderPref, keys };
   return keys;
 }
 const inScope = (e) => { const k = scopeKeys(); return !k || k.has(e.entryKey); };
@@ -407,6 +443,8 @@ function renderViewChips() {
     btn.addEventListener('click', () => setDexView(v.key));
     el.viewChips.append(btn);
   }
+  el.genderChips.replaceChildren();
+  genderChips(el.genderChips);
 }
 
 function renderGenChips() {
@@ -734,6 +772,31 @@ function setDexView(value) {
   render();
 }
 
+// One preference, two surfaces: the grid re-renders immediately, the plan reloads.
+function setGenderPref(value) {
+  state.genderPref = value;
+  state.acqStepFilter = null; state.acqStepKeys = null;
+  invalidateScope();
+  try { localStorage.setItem(GENDER_KEY, value); } catch { /* ignore */ }
+  render();
+  Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); });
+}
+
+function genderChips(container) {
+  for (const g of GENDER_PREFS) {
+    const active = state.genderPref === g.key;
+    const btn = elem('button', {
+      ...chipBase(), minHeight: '38px', fontSize: '12.5px',
+      background: active ? T.text : T.card, border: `1.5px solid ${active ? T.text : T.border}`,
+      color: active ? T.page : T.muted,
+    }, g.label);
+    btn.type = 'button'; btn.dataset.gender = g.key;
+    btn.setAttribute('aria-pressed', String(active));
+    btn.addEventListener('click', () => setGenderPref(g.key));
+    container.append(btn);
+  }
+}
+
 const shortPlatform = (p) => (p === 'service' ? 'SERVICE' : (PLATFORM_LABELS[p] ?? p.toUpperCase()));
 
 /** The "shopping list to complete the dex" — the primary planner content. */
@@ -856,6 +919,8 @@ function renderPlanner() {
   const goalRow = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' });
   goalRow.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, 'GOAL:'));
   for (const g of GOAL_SCOPES) { const b = acqChip(state.goalScope === g.key, g.label, () => setGoalScope(g.key)); b.dataset.scope = g.key; goalRow.append(b); }
+  goalRow.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, margin: '0 2px 0 10px' }, 'GENDERS:'));
+  for (const g of GENDER_PREFS) { const b = acqChip(state.genderPref === g.key, g.label, () => setGenderPref(g.key)); b.dataset.gender = g.key; goalRow.append(b); }
   root.append(goalRow);
 
   // Scope progress: phase banner (phased) or a plain caught-of-goal line.
@@ -1467,7 +1532,7 @@ async function loadTransfer() {
 
 async function loadPlan() {
   try {
-    const plan = await api(`/api/plan?scope=${encodeURIComponent(state.goalScope)}`);
+    const plan = await api(`/api/plan?scope=${encodeURIComponent(state.goalScope)}&gender=${encodeURIComponent(state.genderPref)}`);
     state.plan = Object.fromEntries(plan.species.map((s) => [s.entryKey, s]));
     state.planSummary = plan.summary;
     state.acquisitions = plan.acquisitions;
@@ -1477,7 +1542,7 @@ async function loadPlan() {
 
 async function loadAcquire() {
   try {
-    state.acquirePlan = await api(`/api/acquire?mode=${encodeURIComponent(state.acquireMode)}&rank=${encodeURIComponent(state.acquireRank)}&scope=${encodeURIComponent(state.goalScope)}`);
+    state.acquirePlan = await api(`/api/acquire?mode=${encodeURIComponent(state.acquireMode)}&rank=${encodeURIComponent(state.acquireRank)}&scope=${encodeURIComponent(state.goalScope)}&gender=${encodeURIComponent(state.genderPref)}`);
   } catch { state.acquirePlan = null; }
 }
 const verdictOf = (e) => state.plan[e.entryKey]?.verdict ?? null;
@@ -1553,7 +1618,7 @@ function init() {
     region: $('region'), caught: $('caught'), total: $('total'), pct: $('pct'), progress: $('progress'),
     genChips: $('gen-chips'), statusChips: $('status-chips'), typeChips: $('type-chips'), search: $('search'),
     obtainRow: $('obtain-row'), obtainChips: $('obtain-chips'), gameSelect: $('game-select'), themeBtn: $('theme-btn'),
-    viewRow: $('view-row'), viewChips: $('view-chips'),
+    viewRow: $('view-row'), viewChips: $('view-chips'), genderChips: $('gender-chips'),
     loading: $('loading'), skeleton: $('skeleton'), empty: $('empty'), emptyTitle: $('empty-title'),
     emptyBody: $('empty-body'), emptyAction: $('empty-action'), results: $('results'), resultLabel: $('result-label'),
     grid: $('grid'), importFile: $('import-file'), toast: $('toast'), mirrorBtn: $('mirror-btn'),
@@ -1574,6 +1639,8 @@ function init() {
     if (GOAL_SCOPES.some((g) => g.key === savedScope)) state.goalScope = savedScope;
     const savedView = localStorage.getItem(DEX_VIEW_KEY);
     if (DEX_VIEWS.some((v) => v.key === savedView)) state.dexView = savedView;
+    const savedGender = localStorage.getItem(GENDER_KEY);
+    if (GENDER_PREFS.some((g) => g.key === savedGender)) state.genderPref = savedGender;
   } catch { /* ignore */ }
   syncTheme();
 

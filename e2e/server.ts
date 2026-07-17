@@ -11,7 +11,19 @@ import path from 'node:path';
 import { createApp } from '../src/app.js';
 import { MemoryStore } from '../src/store/memory.js';
 import { SpriteMirror } from '../src/sprites.js';
+import type { Entry } from '../src/types.js';
 import { CONTRACT_ENTRIES } from '../test/fixtures/entries.js';
+
+// Gen IV additions for the gender-preference specs (a new generation, so the
+// Gen I/VI counts the other specs assert stay untouched): Turtwig is a
+// dual-gender pair with NO visual difference (collapses under "Distinct only"),
+// Hippopotas a pair WITH one (genderVisualDiff via obtainability below).
+const GENDER_FIXTURES: Entry[] = [
+  { entryKey: '0387-default-male', dex: 387, name: 'Turtwig', formSlug: 'default', formLabel: null, gender: 'male', types: ['grass'], generation: 4, spriteUrl: 'https://sprites.example/387.png', isCosmetic: false },
+  { entryKey: '0387-default-female', dex: 387, name: 'Turtwig', formSlug: 'default', formLabel: null, gender: 'female', types: ['grass'], generation: 4, spriteUrl: 'https://sprites.example/387.png', isCosmetic: false },
+  { entryKey: '0449-default-male', dex: 449, name: 'Hippopotas', formSlug: 'default', formLabel: null, gender: 'male', types: ['ground'], generation: 4, spriteUrl: 'https://sprites.example/449.png', isCosmetic: false },
+  { entryKey: '0449-default-female', dex: 449, name: 'Hippopotas', formSlug: 'default', formLabel: null, gender: 'female', types: ['ground'], generation: 4, spriteUrl: 'https://sprites.example/449-f.png', isCosmetic: false },
+];
 
 const port = Number.parseInt(process.env.E2E_PORT ?? '8199', 10);
 
@@ -35,7 +47,7 @@ await sprites.init();
 
 async function resetState(): Promise<void> {
   await store.reset();
-  await store.upsertEntries(CONTRACT_ENTRIES);
+  await store.upsertEntries([...CONTRACT_ENTRIES, ...GENDER_FIXTURES]);
   await store.setStatus({ entryKey: '0666-fancy-female', caught: true, gameOrigin: 'emu:Violet' });
   // HOME-derived specimen on the one caught entry, so badges + the detail-sheet
   // Best Specimen zone can be exercised end to end.
@@ -67,6 +79,9 @@ async function resetState(): Promise<void> {
       availability: [{ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true }],
       teraAvailable: true, catchableOnSwitch: true, originGames: ['xy', 'oras'],
     }) },
+    // Hippopotas ♂/♀ are visually distinct — both slots survive "Distinct only".
+    { entryKey: '0449-default-male', obtainability: ob({ genderVisualDiff: true }) },
+    { entryKey: '0449-default-female', obtainability: ob({ genderVisualDiff: true }) },
   ]);
 }
 await resetState();
