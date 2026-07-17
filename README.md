@@ -110,6 +110,12 @@ mock data + localStorage:
 
 - **Generation-scoped view** — the header count, progress mosaic and Needed/Caught
   chips reflect the selected generation (the region shown beside the wordmark).
+- **VIEW consolidation** (dex only, independent of the planner's goal scope) —
+  **Every slot** (default) shows all forms × genders; **One per species** /
+  **+ Regional forms** collapse each group to a single tile, represented by a
+  caught slot when any slot of the group is caught (so the species reads as
+  done regardless of which gender/form you banked). Display-only: it never
+  changes what's stored, and the planner's GOAL is chosen separately.
 - **Progress mosaic** — one bar segment per primary type that has returned to the
   dex, coloured by type.
 - **Filters** — generation chips, All/Needed/Caught, a multi-select type row, and
@@ -158,7 +164,8 @@ mock data + localStorage:
       dex grid target the first incomplete phase and show `PHASE n/3` progress).
       A species/form group counts as caught when ANY of its slots is caught — the
       planner never asks you to re-catch a species because you ticked the other
-      gender. The dex grid follows the scope (out-of-scope slots are hidden).
+      gender. The goal scope drives the **plan only**; how the dex grid displays
+      is the separate VIEW control below.
     - **Acquire** — how you get games: cartridge-only / emulator-only / emu-first
       / cartridge-first. `-only` modes ignore your copies held in the other form;
       `-first` modes keep everything you own and label new buys by preference.
