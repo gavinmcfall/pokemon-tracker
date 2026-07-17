@@ -186,8 +186,8 @@ mock data + localStorage:
   *plus* an "ALSO CATCHABLE HERE" section (everything else you still need
   that's available in that game — planned for other stops, but grab it while
   you're playing). Each row shows **how/where**: `wild — Route 119 (super rod)`
-  from the mirror's encounter data (Gen 1→SwSh; newer games have no encounter
-  tables upstream, so their dex members read as "catchable here"), or
+  from the mirror's encounter data (Gen 1→SwSh), `catchable — <areas>` for the
+  modern games via the **Serebii location supplement** (see below), or
   `evolve from <prevo>` with a **TRADE EVO** flag when every evolution path
   needs a trade. A **quick-tick** button on each row marks the catch without
   opening the sheet, recording the stop's game as `gameOrigin` (unless one was
@@ -320,6 +320,27 @@ Alolan vs Kantonian Raichu — regional-form exclusivity is future work).
 The seed sources obtainability best-effort: if the mirror schema isn't populated
 yet it writes the catalogue and skips obtainability (leaving prior values), so
 run the `pokeapi-mirror` job before the seed.
+
+### Serebii location supplement (`src/supplement/`)
+
+PokéAPI has **no encounter data for the modern games** (BDSP, PLA, SV, Z-A) —
+no API does — so their locations come from Serebii's per-species SV dex pages,
+whose Locations table covers base SV, both DLCs (per version) and Legends:
+Z-A + Mega Dimension in one page. `node dist/supplement/run.js`:
+
+- fetches only species in the SV/Z-A era dexes (from the mirror, ~700 pages),
+  **politely**: ≥1.1s between requests, identifying User-Agent, per-species
+  content hashes so refresh runs rewrite nothing that hasn't changed;
+- parses ONLY the semantically-classed Locations table (`td.scarlet`,
+  `td.fooza`, …) — an unrecognized layout degrades to "no supplement", never
+  wrong data — into `supplement.serebii_locations (dex, game_id, version,
+  locations)`; the parser is tested against real captured Serebii HTML;
+- the seed then merges these as **gap-fill only**: mirror-derived locations
+  always win, and a supplement row never invents availability the dex
+  membership doesn't already assert. Per-version rows (Scarlet ≠ Violet) are
+  stored separately — groundwork for version-exclusive planning.
+
+Run order when refreshing everything: mirror → supplement → seed.
 
 ## PokéAPI mirror (`src/mirror/`)
 

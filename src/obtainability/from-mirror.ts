@@ -85,6 +85,26 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
     locsByKey.set(key, arr);
   }
 
+  // Serebii supplement (see src/supplement/): locations for the games PokéAPI
+  // has no encounter data for (sv, za). Only ever fills gaps — mirror-derived
+  // locations win — and only for games the species is already available in.
+  // Best-effort: absent schema (job never run) just means no supplement.
+  const supByKey = new Map<string, string[]>();
+  try {
+    const sup = await client.query<{ dex: string; game_id: string; locations: string[] }>(
+      `select dex::text, game_id, locations from "supplement"."serebii_locations"`,
+    );
+    for (const row of sup.rows) {
+      const key = `${row.dex}:${row.game_id}`;
+      if (locsByKey.has(key)) continue; // mirror data wins
+      const arr: string[] = [];
+      for (const l of row.locations) if (!arr.includes(l)) arr.push(l);
+      const existing = supByKey.get(key);
+      if (existing) { for (const l of arr) if (!existing.includes(l)) existing.push(l); }
+      else supByKey.set(key, arr);
+    }
+  } catch { /* supplement schema not present — nothing to merge */ }
+
   // How each species is reached by evolution: its pre-evolution, and whether
   // every evolution path to it requires a trade (Kadabra → Alakazam).
   const evolutions = await client.query<{ id: string; from_id: string; from_name: string; trade_only: boolean }>(
@@ -116,7 +136,8 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
     // the Hoenn dex but was never catchable in gen 3) — drop the curated
     // exceptions; real routes come back via STATIC_AVAILABILITY.
     if (AVAILABILITY_EXCLUSIONS[dex]?.includes(gameId)) continue;
-    const locations = locsByKey.get(`${dex}:${gameId}`);
+    const key = `${dex}:${gameId}`;
+    const locations = locsByKey.get(key) ?? supByKey.get(key);
     push(dex, { gameId, method: row.wild ? 'wild' : 'available', ...(locations ? { locations } : {}) });
   }
   // Curated static/gift as a supplement, for the rare mon a regional dex omits.
