@@ -103,6 +103,45 @@ export function parseLocations(html: string): SupplementRow[] {
 }
 
 /**
+ * Parse the Locations table of a Serebii **Sword/Shield-era** dex page
+ * (`/pokedex-swsh/<slug>/`) for the two gen-8 games PokéAPI lacks encounter
+ * data for: Brilliant Diamond / Shining Pearl and Legends: Arceus. Keyed by
+ * the visible game-name text, not CSS classes — Serebii recycles classes on
+ * these pages (Legends: Arceus rows reuse `fooeevee`). Sword/Shield rows are
+ * ignored: the mirror has real encounter data for them, and the supplement is
+ * gap-fill only.
+ */
+export function parseLocationsGen8(html: string): SupplementRow[] {
+  const anchor = html.indexOf('<a name="location">');
+  if (anchor === -1) return [];
+  const end = html.indexOf('</table>', anchor);
+  if (end === -1) return [];
+  const block = html.slice(anchor, end);
+
+  const rows: SupplementRow[] = [];
+  const push = (gameId: string, version: string, cell: string) => {
+    const text = decode(cell.replace(TAG, ' '));
+    if (isTransferOnly(text)) return;
+    const locations = linkTexts(cell);
+    if (locations.length === 0) return;
+    rows.push({ gameId, version, locations });
+  };
+
+  for (const tr of block.split(/<tr[ >]/).slice(1)) {
+    const tds = [...tr.matchAll(/<td class="([a-z]+)"[^>]*>(.*?)<\/td>/gs)];
+    if (tds.length === 0) continue;
+    const name = decode(tds[0]![2]!.replace(TAG, ' '));
+    const info = tds.find((t) => t[1] === 'fooinfo');
+    if (!info) continue;
+    if (name === 'Brilliant Diamond') push('bdsp', 'brilliant-diamond', info[2]!);
+    else if (name === 'Shining Pearl') push('bdsp', 'shining-pearl', info[2]!);
+    else if (name === 'Legends: Arceus') push('pla', '', info[2]!);
+    // Sword/Shield (+ their DLC rows) and anything unrecognized: skipped.
+  }
+  return rows;
+}
+
+/**
  * PokéAPI species identifier → Serebii page slug. Serebii drops separators
  * ("roaring-moon" → "roaringmoon"); the exceptions are curated.
  */

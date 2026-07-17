@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { parseLocations, serebiiSlug } from '../src/supplement/serebii.js';
+import { parseLocations, parseLocationsGen8, serebiiSlug } from '../src/supplement/serebii.js';
 
 // Real Serebii markup, captured from www.serebii.net/pokedex-sv/bulbasaur/
 // (via a browser HAR) — not hand-written, so the parser is tested against the
@@ -37,6 +37,27 @@ describe('parseLocations (real Serebii page)', () => {
 
   it('returns [] for pages without a Locations table', () => {
     expect(parseLocations('<html><body>nothing here</body></html>')).toEqual([]);
+  });
+});
+
+describe('parseLocationsGen8 (real Serebii SwSh-era page — Pikachu)', () => {
+  const FIXTURE_G8 = readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'serebii', 'pikachu-swsh-locations.html'),
+    'utf8',
+  );
+  const rows = parseLocationsGen8(FIXTURE_G8);
+
+  it('parses BDSP per version and Legends: Arceus; ignores Sword/Shield rows entirely', () => {
+    expect(rows.find((r) => r.gameId === 'bdsp' && r.version === 'brilliant-diamond')?.locations).toEqual(['Trophy Garden']);
+    expect(rows.find((r) => r.gameId === 'bdsp' && r.version === 'shining-pearl')?.locations).toEqual(['Trophy Garden']);
+    const pla = rows.find((r) => r.gameId === 'pla');
+    expect(pla?.locations.some((l) => /Obsidian Fieldlands/.test(l))).toBe(true);
+    expect(rows.every((r) => r.gameId === 'bdsp' || r.gameId === 'pla')).toBe(true); // no swsh leakage
+  });
+
+  it('is keyed by game-name text, so the recycled fooeevee class cannot mislabel', () => {
+    // The PLA row uses td.fooeevee on these pages; text keying still lands it on pla.
+    expect(rows.filter((r) => r.gameId === 'pla')).toHaveLength(1);
   });
 });
 

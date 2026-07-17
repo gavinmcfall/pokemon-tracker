@@ -324,17 +324,21 @@ run the `pokeapi-mirror` job before the seed.
 ### Serebii location supplement (`src/supplement/`)
 
 PokéAPI has **no encounter data for the modern games** (BDSP, PLA, SV, Z-A) —
-no API does — so their locations come from Serebii's per-species SV dex pages,
-whose Locations table covers base SV, both DLCs (per version) and Legends:
-Z-A + Mega Dimension in one page. `node dist/supplement/run.js`:
+no API does — so their locations come from Serebii's per-species dex pages:
+`/pokedex-sv/` (base SV, both DLCs per version, Legends: Z-A + Mega Dimension
+in one table) and `/pokedex-swsh/` (Brilliant Diamond / Shining Pearl per
+version + Legends: Arceus). `node dist/supplement/run.js`:
 
-- fetches only species in the SV/Z-A era dexes (from the mirror, ~700 pages),
-  **politely**: ≥1.1s between requests, identifying User-Agent, per-species
-  content hashes so refresh runs rewrite nothing that hasn't changed;
-- parses ONLY the semantically-classed Locations table (`td.scarlet`,
-  `td.fooza`, …) — an unrecognized layout degrades to "no supplement", never
-  wrong data — into `supplement.serebii_locations (dex, game_id, version,
-  locations)`; the parser is tested against real captured Serebii HTML;
+- fetches only species in those games' dexes (from the mirror; ≤2 pages per
+  species), **politely**: ≥1.1s between requests, identifying User-Agent,
+  per-species content hashes so refresh runs rewrite nothing that hasn't
+  changed;
+- parses ONLY the Locations table — SV-era pages by semantic CSS class
+  (`td.scarlet`, `td.fooza`, …), SwSh-era pages by visible game-name text
+  (Serebii recycles classes there) — an unrecognized layout degrades to "no
+  supplement", never wrong data — into `supplement.serebii_locations
+  (dex, game_id, version, locations)`; both parsers are tested against real
+  captured Serebii HTML;
 - the seed then merges these as **gap-fill only**: mirror-derived locations
   always win, and a supplement row never invents availability the dex
   membership doesn't already assert. Per-version rows (Scarlet ≠ Violet) are

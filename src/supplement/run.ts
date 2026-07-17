@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { parseLocations, serebiiSlug, type SupplementRow } from './serebii.js';
+import { parseLocations, parseLocationsGen8, serebiiSlug, type SupplementRow } from './serebii.js';
 
 /**
  * Serebii location-supplement job. PokéAPI has no encounter data for the
@@ -40,19 +40,29 @@ async function ensureTables(client: pg.ClientBase, schema: string): Promise<void
   )`);
 }
 
-/** Species (dex + identifier) present in the SV/Z-A era dexes, from the mirror. */
-async function relevantSpecies(client: pg.ClientBase, mirror: string): Promise<{ dex: number; identifier: string }[]> {
-  const res = await client.query<{ species_id: string; identifier: string }>(
-    `select distinct dn.species_id, s.identifier
+/**
+ * Species in the dexes of games the supplement covers, with which Serebii page
+ * era(s) to fetch: `svEra` (/pokedex-sv/: SV + Z-A rows) and `gen8Era`
+ * (/pokedex-swsh/: BDSP + Legends: Arceus rows).
+ */
+async function relevantSpecies(client: pg.ClientBase, mirror: string): Promise<{ dex: number; identifier: string; svEra: boolean; gen8Era: boolean }[]> {
+  const res = await client.query<{ species_id: string; identifier: string; sv_era: boolean; gen8_era: boolean }>(
+    `select dn.species_id, s.identifier,
+            bool_or(vg.identifier in ('scarlet-violet','the-teal-mask','the-indigo-disk','legends-za','mega-dimension')) as sv_era,
+            bool_or(vg.identifier in ('brilliant-diamond-shining-pearl','legends-arceus')) as gen8_era
      from ${qid(mirror)}."pokemon_dex_numbers" dn
      join ${qid(mirror)}."pokedexes" pd on pd.id = dn.pokedex_id and pd.is_main_series = '1'
      join ${qid(mirror)}."pokedex_version_groups" pvg on pvg.pokedex_id = dn.pokedex_id
      join ${qid(mirror)}."version_groups" vg on vg.id = pvg.version_group_id
      join ${qid(mirror)}."pokemon_species" s on s.id = dn.species_id
-     where vg.identifier in ('scarlet-violet','the-teal-mask','the-indigo-disk','legends-za','mega-dimension')
+     where vg.identifier in ('scarlet-violet','the-teal-mask','the-indigo-disk','legends-za','mega-dimension',
+                             'brilliant-diamond-shining-pearl','legends-arceus')
+     group by dn.species_id, s.identifier
      order by 1`,
   );
-  return res.rows.map((r) => ({ dex: Number(r.species_id), identifier: r.identifier }));
+  return res.rows
+    .map((r) => ({ dex: Number(r.species_id), identifier: r.identifier, svEra: r.sv_era, gen8Era: r.gen8_era }))
+    .filter((r) => r.svEra || r.gen8Era);
 }
 
 function hashRows(rows: SupplementRow[]): string {
@@ -85,23 +95,32 @@ export async function runSupplement(
         .rows.map((r) => [r.dex, r.hash]),
     );
 
-    for (const { dex, identifier } of species) {
-      await sleep(DELAY_MS);
-      const url = `${BASE}/pokedex-sv/${serebiiSlug(identifier)}/`;
-      let html: string;
-      try {
-        const res = await fetchImpl(url, { headers: { 'user-agent': USER_AGENT } });
-        if (res.status === 404) { stats.missing += 1; continue; }
-        if (!res.ok) { console.warn(`supplement: ${url} -> ${res.status}, skipping`); stats.failed += 1; continue; }
-        html = await res.text();
-      } catch (err) {
-        console.warn(`supplement: ${url} failed (${String(err).slice(0, 80)}), skipping`);
-        stats.failed += 1;
-        continue;
+    for (const { dex, identifier, svEra, gen8Era } of species) {
+      const pages: { path: string; parse: (html: string) => SupplementRow[] }[] = [
+        ...(svEra ? [{ path: 'pokedex-sv', parse: parseLocations }] : []),
+        ...(gen8Era ? [{ path: 'pokedex-swsh', parse: parseLocationsGen8 }] : []),
+      ];
+      const rows: SupplementRow[] = [];
+      let anyFetched = false;
+      let anyFailed = false;
+      for (const page of pages) {
+        await sleep(DELAY_MS);
+        const url = `${BASE}/${page.path}/${serebiiSlug(identifier)}/`;
+        try {
+          const res = await fetchImpl(url, { headers: { 'user-agent': USER_AGENT } });
+          if (res.status === 404) { stats.missing += 1; continue; }
+          if (!res.ok) { console.warn(`supplement: ${url} -> ${res.status}, skipping`); anyFailed = true; continue; }
+          rows.push(...page.parse(await res.text()));
+          anyFetched = true;
+        } catch (err) {
+          console.warn(`supplement: ${url} failed (${String(err).slice(0, 80)}), skipping`);
+          anyFailed = true;
+        }
       }
+      if (anyFailed) { stats.failed += 1; continue; } // partial data would corrupt the hash — keep previous
+      if (!anyFetched) continue;
       stats.fetched += 1;
 
-      const rows = parseLocations(html);
       const hash = hashRows(rows);
       if (!FORCE && hashes.get(dex) === hash) { stats.unchanged += 1; continue; }
 
