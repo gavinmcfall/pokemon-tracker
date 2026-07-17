@@ -111,6 +111,10 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
       if (typeof value === 'object' && value !== null) return badRequest(value.error);
       if (value !== undefined) patch[field] = value;
     }
+    if (b.inHome !== undefined) {
+      if (typeof b.inHome !== 'boolean') return badRequest('inHome must be a boolean');
+      patch.inHome = b.inHome;
+    }
 
     const status = await store.setStatus(patch);
     if (status === null) return c.json({ error: `unknown entryKey "${patch.entryKey}"` }, 404);

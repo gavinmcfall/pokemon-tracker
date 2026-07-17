@@ -39,7 +39,7 @@ export function serializeCsv(rows: string[][]): string {
 
 export const EXPORT_COLUMNS = [
   'entryKey', 'dex', 'name', 'formSlug', 'formLabel', 'gender', 'types',
-  'generation', 'caught', 'caughtAt', 'gameOrigin', 'method', 'notes',
+  'generation', 'caught', 'caughtAt', 'gameOrigin', 'method', 'notes', 'inHome',
 ] as const;
 
 /** Canonical export; POST /api/import accepts this format back unchanged (round-trip). */
@@ -60,6 +60,7 @@ export function exportCsv(entries: EntryWithStatus[]): string {
       e.status?.gameOrigin ?? '',
       e.status?.method ?? '',
       e.status?.notes ?? '',
+      e.status ? (e.status.inHome ? 'true' : 'false') : '',
     ]);
   }
   return serializeCsv(rows);
@@ -116,6 +117,9 @@ const HEADER_ALIASES: Record<string, string> = {
   method: 'method',
   notes: 'notes',
   note: 'notes',
+  inhome: 'inHome',
+  home: 'inHome',
+  transferred: 'inHome',
 };
 
 function parseGender(raw: string): Gender | null {
@@ -219,6 +223,12 @@ export function planImport(text: string, allEntries: { entryKey: string; dex: nu
       if (gameOrigin !== undefined && gameOrigin !== '') patch.gameOrigin = gameOrigin;
       if (method !== undefined && method !== '') patch.method = method;
       if (notes !== undefined && notes !== '') patch.notes = notes;
+      const inHomeRaw = cell(row, 'inHome');
+      if (inHomeRaw !== undefined && inHomeRaw !== '') {
+        const v = inHomeRaw.trim().toLowerCase();
+        if (TRUTHY.has(v)) patch.inHome = true;
+        else if (FALSY.has(v)) patch.inHome = false;
+      }
       plan.patches.push(patch);
     }
   }

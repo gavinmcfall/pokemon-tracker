@@ -703,15 +703,24 @@ function plannerTile(label, n, color, key) {
   return t;
 }
 
+// Games with no encounter tables upstream: being in their dex effectively
+// means catchable in-game, so don't render dex membership as "unconfirmed".
+const NO_ENCOUNTER_DATA = new Set(['bdsp', 'pla', 'sv', 'za', 'ww', 'go']);
+
 /** The "how/where in THIS game" line for a checklist row. */
 function howWhereText(e, gameId) {
   const a = hasEnrichment(e) ? e.availability.find((x) => x.gameId === gameId) : null;
   if (!a) return 'not catchable here';
   const locs = a.locations && a.locations.length ? ` — ${a.locations.join(', ')}` : '';
+  const evolve = e.evolveFrom ? `evolve from ${e.evolveFrom.name}${e.evolveFrom.trade ? ' · TRADE EVO' : ''}` : null;
   if (a.method === 'wild') return `wild${locs}`;
   if (a.method === 'available' || a.method === 'evolve') {
-    if (e.evolveFrom) return `evolve from ${e.evolveFrom.name}${e.evolveFrom.trade ? ' · TRADE EVO' : ''}`;
-    return 'in this game — method unconfirmed';
+    if (NO_ENCOUNTER_DATA.has(gameId)) {
+      return evolve ? `catchable here · or ${evolve}` : 'catchable here (no location data for this game)';
+    }
+    // Encounter data exists for this game, so "in the dex but not wild" is
+    // meaningful: it's an evolution, gift, in-game trade or static.
+    return evolve ?? 'not wild — in-game gift/trade/static';
   }
   return `${a.method}${locs}`;
 }
@@ -746,8 +755,12 @@ function plannerRow(e, stopGameId) {
     tick.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const patch = { caught: !c };
-      // Record where it was caught, unless the owner already noted an origin.
-      if (!c && !(e.status && e.status.gameOrigin)) patch.gameOrigin = gameLabel(stopGameId) ?? stopGameId;
+      if (!c) {
+        // A fresh session catch sits on this cartridge until you transfer it.
+        patch.inHome = false;
+        // Record where it was caught, unless the owner already noted an origin.
+        if (!(e.status && e.status.gameOrigin)) patch.gameOrigin = gameLabel(stopGameId) ?? stopGameId;
+      }
       saveStatus(e.entryKey, patch, { membershipMayChange: true });
       renderPlanner(); // optimistic state is set synchronously — reflect it now
     });
@@ -957,6 +970,77 @@ function acquireSection() {
   return wrap;
 }
 
+/** Origin label ("Emerald", "Let’s Go") → version-group gameId, for the route line. */
+function originToGameId(origin) {
+  const norm = (s) => String(s).toLowerCase().replace(/^emu:/, '').trim();
+  const target = norm(origin);
+  for (const [gameId, label] of Object.entries(GAME_LABELS)) {
+    if (norm(label) === target || label.toLowerCase().split('/').some((half) => norm(half) === target)) return gameId;
+  }
+  return null;
+}
+
+async function bulkMarkTransferred(entryKeys) {
+  for (const entryKey of entryKeys) {
+    const e = state.entries.find((x) => x.entryKey === entryKey);
+    if (!e || !e.status) continue;
+    e.status = { ...e.status, inHome: true }; // optimistic
+    try {
+      e.status = await api('/api/status', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ entryKey, caught: true, inHome: true }),
+      });
+    } catch (err) {
+      e.status = { ...e.status, inHome: false };
+      toast(`Couldn't mark ${e.name}: ${err.message}`, true);
+      break;
+    }
+  }
+  if (state.view === 'planner') renderPlanner();
+}
+
+/** Catches sitting in a game awaiting transfer to HOME, grouped by origin. */
+function backlogSection() {
+  const waiting = state.entries.filter((e) => isCaught(e) && e.status && e.status.inHome === false);
+  if (waiting.length === 0) return null;
+  const groups = new Map();
+  for (const e of waiting) {
+    const key = e.status.gameOrigin || 'Unknown game';
+    const arr = groups.get(key);
+    if (arr) arr.push(e); else groups.set(key, [e]);
+  }
+
+  const wrap = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
+  wrap.className = 'backlog';
+  wrap.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted },
+    `TRANSFER BACKLOG — ${waiting.length} caught, not yet in HOME`));
+
+  for (const [origin, members] of groups) {
+    const row = elem('div', {
+      display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '10px',
+      background: T.card, border: `1px solid ${T.gold}`, flexWrap: 'wrap',
+    });
+    row.className = 'backlog-group'; row.dataset.origin = origin;
+    const mid = elem('span', { display: 'flex', flexDirection: 'column', gap: '1px', flex: '1', minWidth: '160px' });
+    mid.append(elem('span', { fontSize: '14px', fontWeight: '700', color: T.text }, `${origin} — ${members.length} waiting`));
+    const gameId = originToGameId(origin);
+    const route = gameId && state.transfer[gameId] ? state.transfer[gameId].route : '';
+    if (route) mid.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', color: T.muted }, route));
+    row.append(mid);
+
+    const done = elem('button', {
+      ...chipBase(), minHeight: '36px', padding: '0 12px', fontSize: '12px',
+      background: T.owned, border: `1.5px solid ${T.owned}`, color: T.page,
+    }, 'Mark transferred');
+    done.type = 'button'; done.className = 'backlog-done';
+    done.title = `All ${members.length} from ${origin} are now in HOME`;
+    done.addEventListener('click', () => bulkMarkTransferred(members.map((e) => e.entryKey)));
+    row.append(done);
+    wrap.append(row);
+  }
+  return wrap;
+}
+
 const PLANNER_ROW_CAP = 400;
 function renderPlanner() {
   const root = el.planner;
@@ -989,6 +1073,10 @@ function renderPlanner() {
 
   // The completion itinerary — the primary content.
   root.append(acquireSection());
+
+  // Catches waiting in a game for their trip to HOME.
+  const backlog = backlogSection();
+  if (backlog) root.append(backlog);
 
   // Breakdown by verdict (secondary). Summary tiles (click to filter).
   const tiles = elem('div', { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))', gap: '8px' });
@@ -1076,10 +1164,10 @@ async function saveStatus(entryKey, patch, opts = {}) {
   const prev = e.status ? { ...e.status } : null;
   const caught = 'caught' in patch ? patch.caught : Boolean(e.status && e.status.caught);
   // optimistic local update
-  e.status = { ...(e.status ?? { entryKey, caught: false, caughtAt: null, gameOrigin: null, method: null, notes: null }), ...patch, caught };
+  e.status = { ...(e.status ?? { entryKey, caught: false, caughtAt: null, gameOrigin: null, method: null, notes: null, inHome: true }), ...patch, caught };
 
   const body = { entryKey, caught };
-  for (const f of ['gameOrigin', 'method', 'notes']) if (f in patch) body[f] = patch[f];
+  for (const f of ['gameOrigin', 'method', 'notes', 'inHome']) if (f in patch) body[f] = patch[f];
   if ('caught' in patch) invalidateScope(); // caught-any group representatives may shift
 
   if (opts.membershipMayChange) {
@@ -1217,6 +1305,20 @@ function renderSheetInto(e, refocusCaught) {
   caughtBtn.type = 'button'; caughtBtn.setAttribute('aria-pressed', String(st.caught));
   caughtBtn.addEventListener('click', () => saveStatus(e.entryKey, { caught: !st.caught }, { membershipMayChange: true, rerenderSheet: true }));
   caughtRow.append(caughtBtn);
+  if (st.caught) {
+    // Transfer state: banked in HOME, or still sitting in its origin game.
+    const inHome = st.inHome !== false;
+    const homeBtn = elem('button', {
+      ...chipBase(), minHeight: '44px', padding: '0 14px', fontSize: '13px',
+      background: inHome ? `color-mix(in oklab, ${T.owned} 16%, ${T.card})` : `color-mix(in oklab, ${T.gold} 16%, ${T.card})`,
+      border: `1.5px solid ${inHome ? T.owned : T.gold}`, color: T.text,
+    }, inHome ? '◆ In HOME' : `⬖ In ${st.gameOrigin || 'a game'} — not in HOME`);
+    homeBtn.type = 'button'; homeBtn.className = 'home-toggle';
+    homeBtn.title = inHome ? 'Banked in Pokémon HOME — tap if it is still in a game' : 'Awaiting transfer — tap once it reaches HOME';
+    homeBtn.setAttribute('aria-pressed', String(inHome));
+    homeBtn.addEventListener('click', () => saveStatus(e.entryKey, { caught: true, inHome: !inHome }, { rerenderSheet: true }));
+    caughtRow.append(homeBtn);
+  }
   if (st.caught && st.caughtAt) caughtRow.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', color: T.muted }, `caught ${String(st.caughtAt).slice(0, 10)}`));
   my.append(caughtRow);
 

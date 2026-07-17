@@ -130,6 +130,25 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       expect(list[0]!.status).toMatchObject({ caught: true, notes: 'keeper' });
     });
 
+    it('inHome: defaults true, patches persist, metadata patches keep it, uncatch resets it', async () => {
+      const store = await makeStore();
+      await store.upsertEntries(CONTRACT_ENTRIES);
+      // Plain catch (a HOME import) → assumed banked.
+      let s = await store.setStatus({ entryKey: '0006-default-male', caught: true });
+      expect(s?.inHome).toBe(true);
+      // A session catch is in transit until transferred.
+      s = await store.setStatus({ entryKey: '0006-default-male', caught: true, inHome: false });
+      expect(s?.inHome).toBe(false);
+      // Metadata patch without inHome leaves the transfer state alone.
+      s = await store.setStatus({ entryKey: '0006-default-male', caught: true, notes: 'boxed in Emerald' });
+      expect(s?.inHome).toBe(false);
+      const listed = (await store.listEntries({ status: 'caught' }))[0]!;
+      expect(listed.status?.inHome).toBe(false);
+      // Releasing clears the transfer state.
+      s = await store.setStatus({ entryKey: '0006-default-male', caught: false });
+      expect(s?.inHome).toBe(true);
+    });
+
     it('deleteEntries removes the slot and its dependent rows, reports the count', async () => {
       const store = await makeStore();
       await store.upsertEntries(CONTRACT_ENTRIES);

@@ -15,7 +15,7 @@ function entry(dex: number, opts: { caught?: boolean; ob?: Obtainability | null 
   return {
     entryKey, dex, name: `mon${dex}`, formSlug: 'default', formLabel: null, gender: 'male',
     types: ['normal'], generation: 1, spriteUrl: '', isCosmetic: false,
-    status: opts.caught ? { entryKey, caught: true, caughtAt: null, gameOrigin: null, method: null, notes: null } : null,
+    status: opts.caught ? { entryKey, caught: true, caughtAt: null, gameOrigin: null, method: null, notes: null, inHome: true } : null,
     specimen: null,
     obtainability: opts.ob === undefined ? ob(['sv']) : opts.ob,
   };
