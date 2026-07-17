@@ -715,6 +715,8 @@ function howWhereText(e, gameId) {
   const evolve = e.evolveFrom ? `evolve from ${e.evolveFrom.name}${e.evolveFrom.trade ? ' · TRADE EVO' : ''}` : null;
   if (a.method === 'wild') return `wild${locs}`;
   if (a.method === 'available' || a.method === 'evolve') {
+    // Modern games get locations from the Serebii supplement when it has run.
+    if (a.locations && a.locations.length) return `catchable${locs}`;
     if (NO_ENCOUNTER_DATA.has(gameId)) {
       return evolve ? `catchable here · or ${evolve}` : 'catchable here (no location data for this game)';
     }

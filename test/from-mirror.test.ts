@@ -1,7 +1,11 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { loadCsv } from '../src/mirror/load.js';
 import { obtainabilityFromMirror } from '../src/obtainability/from-mirror.js';
+import { runSupplement } from '../src/supplement/run.js';
 
 const url = process.env.TEST_DATABASE_URL;
 
@@ -13,9 +17,9 @@ const url = process.env.TEST_DATABASE_URL;
 const FIXTURE: Record<string, string> = {
   version_groups: 'id,identifier\n15,x-y\n20,sword-shield\n25,scarlet-violet\n',
   versions: 'id,version_group_id,identifier\n24,15,x\n31,20,sword\n',
-  pokedexes: 'id,region_id,identifier,is_main_series\n12,6,kalos-central,1\n27,8,galar,1\n1,,national,1\n',
-  pokedex_version_groups: 'pokedex_id,version_group_id\n12,15\n27,20\n',
-  pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n6,12,6\n6,27,384\n888,27,138\n6,1,6\n888,1,888\n893,27,999\n',
+  pokedexes: 'id,region_id,identifier,is_main_series\n12,6,kalos-central,1\n27,8,galar,1\n31,10,paldea,1\n1,,national,1\n',
+  pokedex_version_groups: 'pokedex_id,version_group_id\n12,15\n27,20\n31,25\n',
+  pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n6,12,6\n6,27,384\n6,31,999\n888,27,138\n6,1,6\n888,1,888\n893,27,999\n',
   pokemon_species:
     'id,identifier,generation_id,has_gender_differences,evolves_from_species_id\n' +
     '6,charizard,1,0,5\n5,charmeleon,1,0,4\n888,zacian,8,0,\n893,zarude,8,0,\n808,meltan,7,0,\n' +
@@ -47,9 +51,9 @@ const FIXTURE: Record<string, string> = {
       const charizard = byDex.get(6)!;
       expect(charizard.gmaxCapable).toBe(true);                 // has a -gmax form
       expect(charizard.catchableOnSwitch).toBe(true);           // swsh
-      expect(charizard.teraAvailable).toBe(false);              // not in SV in this fixture
+      expect(charizard.teraAvailable).toBe(true);               // in the fixture's Paldea dex
       expect(Object.fromEntries(charizard.availability.map((a) => [a.gameId, a.method]))).toEqual({
-        xy: 'available', swsh: 'available',                     // in the dex, not wild-encounterable
+        xy: 'available', swsh: 'available', sv: 'available',    // in the dex, not wild-encounterable
       });
       expect(charizard.availability.every((a) => a.shinyPossible)).toBe(true);
 
@@ -82,6 +86,50 @@ const FIXTURE: Record<string, string> = {
     } finally {
       await client.query('drop schema if exists pokeapi_fx cascade').catch(() => {});
       await client.end();
+    }
+  });
+
+  it('serebii supplement fills modern-game locations (gap-fill only, membership-gated)', async () => {
+    const serebiiHtml = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'serebii', 'bulbasaur-locations.html'),
+      'utf8',
+    );
+    const pool = new pg.Pool({ connectionString: url, max: 2 });
+    const client = await pool.connect();
+    try {
+      await client.query('drop schema if exists pokeapi_fx cascade');
+      await client.query('drop schema if exists supplement cascade');
+      await client.query('create schema pokeapi_fx');
+      for (const [table, csv] of Object.entries(FIXTURE)) await loadCsv(client, 'pokeapi_fx', table, csv);
+
+      // The fixture's only SV-era species is Charizard; the fake fetch serves
+      // it the real captured Serebii page (SV DLC rows + Z-A rows).
+      const fetched: string[] = [];
+      const fake = (async (input: string | URL | Request) => {
+        fetched.push(String(input));
+        return new Response(serebiiHtml, { status: 200 });
+      }) as typeof fetch;
+
+      const stats = await runSupplement(pool, { fetchImpl: fake, mirrorSchema: 'pokeapi_fx', delayMs: 1 });
+      expect(fetched).toEqual(['https://www.serebii.net/pokedex-sv/charizard/']);
+      expect(stats).toMatchObject({ fetched: 1, updated: 1, unchanged: 0 });
+
+      // Second run: page unchanged → no writes.
+      const again = await runSupplement(pool, { fetchImpl: fake, mirrorSchema: 'pokeapi_fx', delayMs: 1 });
+      expect(again).toMatchObject({ fetched: 1, updated: 0, unchanged: 1 });
+
+      const byDex = await obtainabilityFromMirror(client, 'pokeapi_fx');
+      const sv = byDex.get(6)!.availability.find((a) => a.gameId === 'sv')!;
+      // Scarlet ∪ Violet DLC rows, deduped and capped at 3.
+      expect(sv.locations).toEqual(['The Indigo Disk: Coastal Biome', 'The Indigo Disk: Torchlit Labyrinth']);
+      // Z-A rows exist in the supplement but Charizard has no za dex membership
+      // in this fixture — gap-fill never invents availability.
+      expect(byDex.get(6)!.availability.some((a) => a.gameId === 'za')).toBe(false);
+    } finally {
+      await client.query('drop schema if exists pokeapi_fx cascade').catch(() => {});
+      await client.query('drop schema if exists supplement cascade').catch(() => {});
+      client.release();
+      await pool.end();
     }
   });
 });
