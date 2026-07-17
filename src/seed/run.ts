@@ -101,9 +101,21 @@ async function main(): Promise<void> {
     const existing = await store.listEntryKeys();
     const stale = [...existing].filter((k) => !byKey.has(k));
     if (stale.length > 0) {
-      console.warn(`seed: ${stale.length} entries exist in the DB but were not produced by this run (tier change or upstream removal). Not deleting — review manually:`);
-      for (const key of stale.slice(0, 50)) console.warn(`  stale: ${key}`);
-      if (stale.length > 50) console.warn(`  … and ${stale.length - 50} more`);
+      // SEED_PRUNE=1 deletes slots the catalogue no longer produces (curated
+      // corrections like the fixed-gender forms, tier changes, upstream
+      // removals). Off by default: pruning drops any catch status on those
+      // slots (cascade), so it stays an explicit opt-in per run.
+      const prune = ['1', 'true', 'yes'].includes((process.env.SEED_PRUNE ?? '').toLowerCase());
+      if (prune) {
+        const removed = await store.deleteEntries(stale);
+        console.log(`seed: pruned ${removed} stale entries no longer in the catalogue:`);
+        for (const key of stale.slice(0, 50)) console.log(`  pruned: ${key}`);
+        if (stale.length > 50) console.log(`  … and ${stale.length - 50} more`);
+      } else {
+        console.warn(`seed: ${stale.length} entries exist in the DB but were not produced by this run (tier change or upstream removal). Set SEED_PRUNE=1 to delete them on the next run:`);
+        for (const key of stale.slice(0, 50)) console.warn(`  stale: ${key}`);
+        if (stale.length > 50) console.warn(`  … and ${stale.length - 50} more`);
+      }
     }
   } finally {
     await store.close();

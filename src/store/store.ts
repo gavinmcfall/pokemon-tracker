@@ -46,6 +46,12 @@ export function normalizeSpecimen(input: SpecimenInput): Specimen {
  */
 export interface Store {
   upsertEntries(entries: Entry[]): Promise<UpsertResult>;
+  /**
+   * Delete entries (and, via cascade/parity, their status/specimen/
+   * obtainability rows). Returns how many entries were actually removed.
+   * Used by the seed's prune step for slots the catalogue no longer produces.
+   */
+  deleteEntries(entryKeys: string[]): Promise<number>;
   listEntries(filters: EntryFilters): Promise<EntryWithStatus[]>;
   listEntryKeys(): Promise<Set<string>>;
   getSummary(gen?: number): Promise<Summary>;

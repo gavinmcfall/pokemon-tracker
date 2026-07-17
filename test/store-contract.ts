@@ -130,6 +130,21 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       expect(list[0]!.status).toMatchObject({ caught: true, notes: 'keeper' });
     });
 
+    it('deleteEntries removes the slot and its dependent rows, reports the count', async () => {
+      const store = await makeStore();
+      await store.upsertEntries(CONTRACT_ENTRIES);
+      await store.setStatus({ entryKey: '0006-mega_x-male', caught: true });
+      const removed = await store.deleteEntries(['0006-mega_x-male', 'no-such-key']);
+      expect(removed).toBe(1);
+      expect((await store.listEntryKeys()).has('0006-mega_x-male')).toBe(false);
+      expect(await store.listEntries({ status: 'caught' })).toHaveLength(0); // status went with it
+      expect(await store.deleteEntries([])).toBe(0);
+      // re-inserting the slot starts clean — no resurrected status
+      await store.upsertEntries(CONTRACT_ENTRIES);
+      const back = (await store.listEntries({})).find((e) => e.entryKey === '0006-mega_x-male');
+      expect(back?.status).toBeNull();
+    });
+
     it('replaceSpecimens embeds specimens, normalizes defaults, reports unmatched', async () => {
       const store = await makeStore();
       await store.upsertEntries(CONTRACT_ENTRIES);
