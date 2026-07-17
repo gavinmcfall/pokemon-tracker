@@ -1,8 +1,16 @@
 import type pg from 'pg';
-import type { Obtainability } from '../types.js';
+import type { EvolveFrom, Obtainability } from '../types.js';
 import { VERSION_GROUP_TO_GAME } from './games.js';
 import { computeObtainabilityFromSources, type ObtainSource } from './compute.js';
 import { AVAILABILITY_EXCLUSIONS, STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
+
+/** "kanto-route-25" → "Route 25"; "old-rod" → "old rod". */
+const REGION_PREFIX = /^(kanto|johto|hoenn|sinnoh|sinnoh-pt|unova|unova-b2w2|kalos|alola|galar|hisui|paldea)-/;
+export function prettyLocation(identifier: string, method: string): string {
+  const stripped = identifier.replace(REGION_PREFIX, '');
+  const words = stripped.split('-').map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w)).join(' ');
+  return method && method !== 'walk' ? `${words} (${method.replaceAll('-', ' ')})` : words;
+}
 
 /**
  * Source obtainability for every species from the local PokéAPI mirror, keyed by
@@ -50,6 +58,50 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
      group by dn.species_id, vg.identifier`,
   );
 
+  // Where each species is wild-encounterable, per version-group: distinct
+  // location + encounter-method pairs (mirror has this for Gen 1→SwSh; the
+  // newest games ship no encounter rows, so their entries just omit locations).
+  const encounterLocs = await client.query<{ species_id: string; version_group: string; loc: string; method: string }>(
+    `select distinct p.species_id, vg.identifier as version_group,
+            l.identifier as loc, coalesce(em.identifier, 'walk') as method
+     from ${q('encounters')} e
+     join ${q('versions')} v on v.id = e.version_id
+     join ${q('version_groups')} vg on vg.id = v.version_group_id
+     join ${q('pokemon')} p on p.id = e.pokemon_id
+     join ${q('location_areas')} la on la.id = e.location_area_id
+     join ${q('locations')} l on l.id = la.location_id
+     left join ${q('encounter_slots')} es on es.id = e.encounter_slot_id
+     left join ${q('encounter_methods')} em on em.id = es.encounter_method_id
+     order by 1, 2, 3, 4`,
+  );
+  const locsByKey = new Map<string, string[]>(); // `${dex}:${gameId}` -> pretty locations
+  for (const row of encounterLocs.rows) {
+    const gameId = VERSION_GROUP_TO_GAME[row.version_group];
+    if (!gameId) continue;
+    const key = `${row.species_id}:${gameId}`;
+    const arr = locsByKey.get(key) ?? [];
+    const pretty = prettyLocation(row.loc, row.method);
+    if (!arr.includes(pretty)) arr.push(pretty);
+    locsByKey.set(key, arr);
+  }
+
+  // How each species is reached by evolution: its pre-evolution, and whether
+  // every evolution path to it requires a trade (Kadabra → Alakazam).
+  const evolutions = await client.query<{ id: string; from_id: string; from_name: string; trade_only: boolean }>(
+    `select s.id, s.evolves_from_species_id as from_id, fs.identifier as from_name,
+            bool_and(coalesce(et.identifier, '') = 'trade') as trade_only
+     from ${q('pokemon_species')} s
+     join ${q('pokemon_species')} fs on fs.id = s.evolves_from_species_id
+     left join ${q('pokemon_evolution')} pe on pe.evolved_species_id = s.id
+     left join ${q('evolution_triggers')} et on et.id = pe.evolution_trigger_id
+     group by s.id, s.evolves_from_species_id, fs.identifier`,
+  );
+  const evolveFromByDex = new Map<number, EvolveFrom>();
+  for (const row of evolutions.rows) {
+    const name = row.from_name.split('-').map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w)).join(' ');
+    evolveFromByDex.set(Number(row.id), { dex: Number(row.from_id), name, trade: row.trade_only });
+  }
+
   const sourcesByDex = new Map<number, ObtainSource[]>();
   const push = (dex: number, source: ObtainSource) => {
     const arr = sourcesByDex.get(dex);
@@ -64,7 +116,8 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
     // the Hoenn dex but was never catchable in gen 3) — drop the curated
     // exceptions; real routes come back via STATIC_AVAILABILITY.
     if (AVAILABILITY_EXCLUSIONS[dex]?.includes(gameId)) continue;
-    push(dex, { gameId, method: row.wild ? 'wild' : 'available' });
+    const locations = locsByKey.get(`${dex}:${gameId}`);
+    push(dex, { gameId, method: row.wild ? 'wild' : 'available', ...(locations ? { locations } : {}) });
   }
   // Curated static/gift as a supplement, for the rare mon a regional dex omits.
   for (const [dexStr, entries] of Object.entries(STATIC_AVAILABILITY)) {
@@ -83,6 +136,7 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
       hasGenderDifferences: m.has_gender_differences === '1',
       hasGmaxVariety: m.has_gmax,
       sources: sourcesByDex.get(dex) ?? [],
+      evolveFrom: evolveFromByDex.get(dex) ?? null,
     }));
   }
   return out;

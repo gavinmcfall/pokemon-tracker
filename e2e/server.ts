@@ -68,8 +68,9 @@ async function resetState(): Promise<void> {
   });
   await store.replaceObtainability([
     { entryKey: '0006-default-male', obtainability: ob({
-      availability: [{ gameId: 'lgpe', label: "Let's Go", platform: 'switch', method: 'wild', shinyPossible: true }],
+      availability: [{ gameId: 'lgpe', label: "Let's Go", platform: 'switch', method: 'wild', shinyPossible: true, locations: ['Route 21', 'Pallet Town'] }],
       gmaxCapable: true, catchableOnSwitch: true, originGames: ['rb', 'yellow'],
+      evolveFrom: { dex: 5, name: 'Charmeleon', trade: false },
     }) },
     { entryKey: '0006-mega_x-male', obtainability: ob({
       availability: [{ gameId: 'rb', label: 'Red/Blue', platform: 'gb', method: 'evolve', shinyPossible: true }],
@@ -79,9 +80,35 @@ async function resetState(): Promise<void> {
       availability: [{ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true }],
       teraAvailable: true, catchableOnSwitch: true, originGames: ['xy', 'oras'],
     }) },
-    // Hippopotas ♂/♀ are visually distinct — both slots survive "Distinct only".
-    { entryKey: '0449-default-male', obtainability: ob({ genderVisualDiff: true }) },
-    { entryKey: '0449-default-female', obtainability: ob({ genderVisualDiff: true }) },
+    // Turtwig: catchable in SV *and* Let's Go — the set-cover assigns it to SV
+    // (which also covers the Hippopotas pair), making it the lgpe checklist's
+    // "also catchable here" species. Trade-evo hint exercises the TRADE badge.
+    { entryKey: '0387-default-male', obtainability: ob({
+      availability: [
+        { gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true },
+        { gameId: 'lgpe', label: "Let's Go", platform: 'switch', method: 'available', shinyPossible: true },
+      ],
+      catchableOnSwitch: true,
+      evolveFrom: { dex: 999, name: 'Tradevo', trade: true },
+    }) },
+    { entryKey: '0387-default-female', obtainability: ob({
+      availability: [
+        { gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true },
+        { gameId: 'lgpe', label: "Let's Go", platform: 'switch', method: 'available', shinyPossible: true },
+      ],
+      catchableOnSwitch: true,
+      evolveFrom: { dex: 999, name: 'Tradevo', trade: true },
+    }) },
+    // Hippopotas ♂/♀ are visually distinct — both slots survive "Distinct only";
+    // SV availability makes SV the biggest stop so Turtwig is assigned there.
+    { entryKey: '0449-default-male', obtainability: ob({
+      availability: [{ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true }],
+      genderVisualDiff: true, catchableOnSwitch: true,
+    }) },
+    { entryKey: '0449-default-female', obtainability: ob({
+      availability: [{ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true }],
+      genderVisualDiff: true, catchableOnSwitch: true,
+    }) },
   ]);
 }
 await resetState();

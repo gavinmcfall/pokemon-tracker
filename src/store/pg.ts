@@ -2,7 +2,7 @@ import pg from 'pg';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AvailabilityEntry, Entry, EntryFilters, EntryWithStatus, GameOwnership, GameOwnershipPatch, Ivs, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import type { AvailabilityEntry, Entry, EntryFilters, EntryWithStatus, EvolveFrom, GameOwnership, GameOwnershipPatch, Ivs, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
 import { OWNERSHIP_METHODS } from '../types.js';
 import { isEmptyOwnership, normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
 
@@ -49,6 +49,7 @@ interface EntryRow {
   ob_gender_visual_diff: boolean | null;
   ob_shiny_locked_in: string[] | null;
   ob_origin_games: string[] | null;
+  ob_evolve_from: EvolveFrom | null;
 }
 
 function rowToEntry(row: EntryRow): EntryWithStatus {
@@ -98,6 +99,7 @@ function rowToEntry(row: EntryRow): EntryWithStatus {
       genderVisualDiff: row.ob_gender_visual_diff ?? false,
       shinyLockedIn: row.ob_shiny_locked_in ?? [],
       originGames: row.ob_origin_games ?? [],
+      evolveFrom: row.ob_evolve_from ?? null,
     },
   };
 }
@@ -126,7 +128,8 @@ const BASE_SELECT = `
          ob.shiny_legal_somewhere as ob_shiny_legal_somewhere,
          ob.unobtainable_legit as ob_unobtainable_legit,
          ob.gender_visual_diff as ob_gender_visual_diff,
-         ob.shiny_locked_in as ob_shiny_locked_in, ob.origin_games as ob_origin_games
+         ob.shiny_locked_in as ob_shiny_locked_in, ob.origin_games as ob_origin_games,
+         ob.evolve_from as ob_evolve_from
   from entries e
   left join status s using (entry_key)
   left join specimen sp using (entry_key)
@@ -398,17 +401,18 @@ export class PgStore implements Store {
         await client.query(
           `insert into obtainability
              (entry_key, availability, gmax_capable, tera_available, catchable_on_switch,
-              shiny_legal_somewhere, unobtainable_legit, gender_visual_diff, shiny_locked_in, origin_games)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+              shiny_legal_somewhere, unobtainable_legit, gender_visual_diff, shiny_locked_in, origin_games, evolve_from)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
            on conflict (entry_key) do update set
              availability=excluded.availability, gmax_capable=excluded.gmax_capable,
              tera_available=excluded.tera_available, catchable_on_switch=excluded.catchable_on_switch,
              shiny_legal_somewhere=excluded.shiny_legal_somewhere, unobtainable_legit=excluded.unobtainable_legit,
              gender_visual_diff=excluded.gender_visual_diff, shiny_locked_in=excluded.shiny_locked_in,
-             origin_games=excluded.origin_games`,
+             origin_games=excluded.origin_games, evolve_from=excluded.evolve_from`,
           [
             entryKey, JSON.stringify(o.availability), o.gmaxCapable, o.teraAvailable, o.catchableOnSwitch,
             o.shinyLegalSomewhere, o.unobtainableLegit, o.genderVisualDiff, o.shinyLockedIn, o.originGames,
+            o.evolveFrom === undefined || o.evolveFrom === null ? null : JSON.stringify(o.evolveFrom),
           ],
         );
         seen.add(entryKey);

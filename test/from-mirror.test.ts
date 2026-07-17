@@ -16,10 +16,21 @@ const FIXTURE: Record<string, string> = {
   pokedexes: 'id,region_id,identifier,is_main_series\n12,6,kalos-central,1\n27,8,galar,1\n1,,national,1\n',
   pokedex_version_groups: 'pokedex_id,version_group_id\n12,15\n27,20\n',
   pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n6,12,6\n6,27,384\n888,27,138\n6,1,6\n888,1,888\n893,27,999\n',
-  pokemon_species: 'id,generation_id,has_gender_differences\n6,1,0\n888,8,0\n893,8,0\n808,7,0\n',
+  pokemon_species:
+    'id,identifier,generation_id,has_gender_differences,evolves_from_species_id\n' +
+    '6,charizard,1,0,5\n5,charmeleon,1,0,4\n888,zacian,8,0,\n893,zarude,8,0,\n808,meltan,7,0,\n' +
+    '64,kadabra,1,0,63\n65,alakazam,1,0,64\n',
   pokemon: 'id,species_id,identifier\n6,6,charizard\n888,888,zacian\n893,893,zarude\n808,808,meltan\n',
   pokemon_forms: 'id,pokemon_id,identifier\n6,6,charizard\n9999,6,charizard-gmax\n888,888,zacian\n893,893,zarude\n808,808,meltan\n',
-  encounters: 'id,version_id,pokemon_id\n1,31,888\n',
+  // Zacian wild in Sword at the Slumbering Weald (walk) + Gloomy Glade (surf).
+  encounters: 'id,version_id,location_area_id,encounter_slot_id,pokemon_id\n1,31,700,900,888\n2,31,701,901,888\n',
+  location_areas: 'id,location_id,identifier\n700,800,slumbering-weald-area\n701,801,gloomy-glade-area\n',
+  locations: 'id,region_id,identifier\n800,8,galar-slumbering-weald\n801,8,gloomy-glade\n',
+  encounter_slots: 'id,version_group_id,encounter_method_id,slot,rarity\n900,20,1,1,50\n901,20,5,1,10\n',
+  encounter_methods: 'id,identifier\n1,walk\n5,surf\n',
+  // Charizard ← Charmeleon by level-up; Alakazam ← Kadabra by trade only.
+  pokemon_evolution: 'id,evolved_species_id,evolution_trigger_id\n1,6,1\n2,65,2\n',
+  evolution_triggers: 'id,identifier\n1,level-up\n2,trade\n',
 };
 
 (url ? describe : describe.skip)('obtainabilityFromMirror', () => {
@@ -44,10 +55,18 @@ const FIXTURE: Record<string, string> = {
 
       const zacian = byDex.get(888)!;
       expect(zacian.availability).toEqual([
-        { gameId: 'swsh', label: 'Sword/Shield', platform: 'switch', method: 'wild', shinyPossible: false },
+        {
+          gameId: 'swsh', label: 'Sword/Shield', platform: 'switch', method: 'wild', shinyPossible: false,
+          locations: ['Slumbering Weald', 'Gloomy Glade (surf)'], // ordered by raw identifier
+        },
       ]);
       expect(zacian.shinyLockedIn).toEqual(['swsh']);           // curated shiny-lock
       expect(zacian.catchableOnSwitch).toBe(true);
+
+      // Evolution "how" hints: level-up line vs a trade-only evolution.
+      expect(charizard.evolveFrom).toEqual({ dex: 5, name: 'Charmeleon', trade: false });
+      expect(byDex.get(65)!.evolveFrom).toEqual({ dex: 64, name: 'Kadabra', trade: true });
+      expect(zacian.evolveFrom).toBeNull();
 
       // Zarude is in the Galar dex but was event-only there: the curated
       // exclusion drops the listing and the species renders event-only.
