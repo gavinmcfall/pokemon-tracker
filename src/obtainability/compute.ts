@@ -1,4 +1,4 @@
-import type { AvailabilityEntry, Obtainability } from '../types.js';
+import type { AvailabilityEntry, EvolveFrom, Obtainability } from '../types.js';
 import type { RawChainLink } from '../seed/pokeapi.js';
 import { GAME_BY_ID, GAMES, SWITCH_GAME_IDS, byReleaseOrder } from './games.js';
 import {
@@ -74,6 +74,8 @@ export function ownDirectlyObtainableGames(dex: number, wildGameIds: Iterable<st
 export interface ObtainSource {
   gameId: string;
   method: ObtainMethod;
+  /** Where in this game (mirror encounter data), e.g. "Route 119 (super rod)". */
+  locations?: string[];
 }
 
 export interface SourcedInput {
@@ -82,7 +84,12 @@ export interface SourcedInput {
   hasGenderDifferences: boolean;
   hasGmaxVariety: boolean;
   sources: ObtainSource[];
+  /** How the species is reached by evolution, when it evolves from another. */
+  evolveFrom?: EvolveFrom | null;
 }
+
+/** Most location hints shown per game — enough to start playing, not a wiki. */
+const MAX_LOCATIONS = 3;
 
 /**
  * Assemble the final Obtainability from a raw source list (one entry per way a
@@ -94,19 +101,27 @@ export function computeObtainabilityFromSources(input: SourcedInput): Obtainabil
   const { dex, generation, hasGenderDifferences, hasGmaxVariety } = input;
   const shinyLockedEverywhere = SHINY_LOCKED_EVERYWHERE.has(dex);
 
-  const byGame = new Map<string, string>();
+  const byGame = new Map<string, { method: string; locations: string[] }>();
   for (const s of input.sources) {
     if (!GAME_BY_ID.has(s.gameId)) continue;
     const existing = byGame.get(s.gameId);
-    byGame.set(s.gameId, existing ? moreDirect(existing, s.method) : s.method);
+    if (!existing) {
+      byGame.set(s.gameId, { method: s.method, locations: [...(s.locations ?? [])] });
+    } else {
+      existing.method = moreDirect(existing.method, s.method);
+      for (const loc of s.locations ?? []) if (!existing.locations.includes(loc)) existing.locations.push(loc);
+    }
   }
 
   const availability: AvailabilityEntry[] = [...byGame.entries()]
     .sort(([a], [b]) => byReleaseOrder(a, b))
-    .map(([gameId, method]) => {
+    .map(([gameId, { method, locations }]) => {
       const meta = GAME_BY_ID.get(gameId)!;
       const shinyPossible = !shinyLockedEverywhere && !(STATIC_SHINY_LOCK[gameId]?.includes(dex));
-      return { gameId, label: meta.label, platform: meta.platform, method, shinyPossible };
+      return {
+        gameId, label: meta.label, platform: meta.platform, method, shinyPossible,
+        ...(locations.length ? { locations: locations.slice(0, MAX_LOCATIONS) } : {}),
+      };
     });
 
   const shinyLockedIn = availability
@@ -125,6 +140,7 @@ export function computeObtainabilityFromSources(input: SourcedInput): Obtainabil
     genderVisualDiff: hasGenderDifferences,
     shinyLockedIn,
     originGames,
+    evolveFrom: input.evolveFrom ?? null,
   };
 }
 

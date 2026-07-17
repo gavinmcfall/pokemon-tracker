@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import type { RawChainLink } from '../src/seed/pokeapi.js';
-import { chainAncestors, computeObtainability, ownDirectlyObtainableGames } from '../src/obtainability/compute.js';
+import { chainAncestors, computeObtainability, computeObtainabilityFromSources, ownDirectlyObtainableGames } from '../src/obtainability/compute.js';
+
+describe('computeObtainabilityFromSources — companion how/where fields', () => {
+  const base = { dex: 999, generation: 1, hasGenderDifferences: false, hasGmaxVariety: false };
+
+  it('merges locations across sources for the same game, capped at 3', () => {
+    const ob = computeObtainabilityFromSources({ ...base, sources: [
+      { gameId: 'swsh', method: 'available', locations: ['Route 1', 'Route 2'] },
+      { gameId: 'swsh', method: 'wild', locations: ['Route 2', 'Route 3', 'Route 4'] },
+    ] });
+    expect(ob.availability).toHaveLength(1);
+    expect(ob.availability[0]).toMatchObject({ method: 'wild', locations: ['Route 1', 'Route 2', 'Route 3'] });
+  });
+
+  it('omits locations when none are known, and passes evolveFrom through (default null)', () => {
+    const ob = computeObtainabilityFromSources({ ...base, sources: [{ gameId: 'sv', method: 'available' }], evolveFrom: { dex: 998, name: 'Prevo', trade: true } });
+    expect('locations' in ob.availability[0]!).toBe(false);
+    expect(ob.evolveFrom).toEqual({ dex: 998, name: 'Prevo', trade: true });
+    expect(computeObtainabilityFromSources({ ...base, sources: [] }).evolveFrom).toBeNull();
+  });
+});
 
 // Charmander → Charmeleon → Charizard
 const charizardChain: RawChainLink = {

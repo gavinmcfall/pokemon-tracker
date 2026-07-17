@@ -159,7 +159,8 @@ const state = {
   acquireRank: 'fewest-games',
   acquirePlan: null,
   acqStepFilter: null, // itinerary stop id whose species are shown
-  acqStepKeys: null,   // Set of entryKeys for that stop
+  acqStepKeys: null,   // Set of entryKeys assigned to that stop
+  acqStepExtraKeys: null, // Set of other missing entryKeys also catchable there (snapshot)
   acqStepLabel: '',
   goalScope: 'phased', // planner GoalScope — what the PLAN counts toward "done"
   planPhase: null,     // {n, of, label, caught, total} from the API when scope is phased
@@ -698,11 +699,27 @@ function plannerTile(label, n, color, key) {
   t.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '22px', fontWeight: '700', color }, String(n)));
   t.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', letterSpacing: '0.06em', color: T.muted }, label.toUpperCase()));
   t.dataset.verdict = key;
-  t.addEventListener('click', () => { state.planFilter = active ? 'all' : key; state.acqStepFilter = null; state.acqStepKeys = null; renderPlanner(); });
+  t.addEventListener('click', () => { state.planFilter = active ? 'all' : key; state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null; renderPlanner(); });
   return t;
 }
 
-function plannerRow(e) {
+/** The "how/where in THIS game" line for a checklist row. */
+function howWhereText(e, gameId) {
+  const a = hasEnrichment(e) ? e.availability.find((x) => x.gameId === gameId) : null;
+  if (!a) return 'not catchable here';
+  const locs = a.locations && a.locations.length ? ` — ${a.locations.join(', ')}` : '';
+  if (a.method === 'wild') return `wild${locs}`;
+  if (a.method === 'available' || a.method === 'evolve') {
+    if (e.evolveFrom) return `evolve from ${e.evolveFrom.name}${e.evolveFrom.trade ? ' · TRADE EVO' : ''}`;
+    return 'in this game — method unconfirmed';
+  }
+  return `${a.method}${locs}`;
+}
+
+// `stopGameId` puts the row in companion-checklist mode: the detail line shows
+// how/where to get it in THAT game, and a quick-tick button marks it caught
+// (recording the game as origin) without opening the sheet.
+function plannerRow(e, stopGameId) {
   const p = state.plan[e.entryKey];
   const verdict = p?.verdict ?? 'unknown';
   const meta = VERDICT_META[verdict] ?? VERDICT_META.unknown;
@@ -714,19 +731,45 @@ function plannerRow(e) {
   });
   row.type = 'button'; row.className = 'planner-row'; row.dataset.entryKey = e.entryKey; row.dataset.verdict = verdict;
 
-  const img = elem('img', { width: '40px', height: '40px', imageRendering: 'pixelated', flexShrink: 0, filter: verdict === 'have' ? 'none' : 'none' });
+  if (stopGameId) {
+    const c = isCaught(e);
+    const tick = elem('span', {
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      width: '34px', height: '34px', borderRadius: '50%', flexShrink: 0, fontSize: '17px',
+      background: c ? `color-mix(in oklab, ${T.owned} 20%, ${T.card})` : T.raised,
+      border: `1.5px solid ${c ? T.owned : T.border}`, color: c ? T.owned : T.muted,
+      cursor: 'pointer',
+    }, c ? '◉' : '○');
+    tick.className = 'row-tick'; tick.setAttribute('role', 'button');
+    tick.title = c ? 'Caught — tap to unmark' : `Mark caught in ${state.acqStepLabel}`;
+    tick.setAttribute('aria-label', tick.title);
+    tick.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const patch = { caught: !c };
+      // Record where it was caught, unless the owner already noted an origin.
+      if (!c && !(e.status && e.status.gameOrigin)) patch.gameOrigin = gameLabel(stopGameId) ?? stopGameId;
+      saveStatus(e.entryKey, patch, { membershipMayChange: true });
+      renderPlanner(); // optimistic state is set synchronously — reflect it now
+    });
+    row.append(tick);
+  }
+
+  const img = elem('img', { width: '40px', height: '40px', imageRendering: 'pixelated', flexShrink: 0 });
   img.src = e.spriteUrl; img.alt = ''; img.loading = 'lazy'; img.draggable = false;
 
   const mid = elem('span', { display: 'flex', flexDirection: 'column', gap: '1px', flex: '1', minWidth: '0' });
   const title = elem('span', { fontSize: '13.5px', fontWeight: '700', color: T.text });
   title.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: T.muted }, '#' + String(e.dex).padStart(4, '0') + ' '), document.createTextNode(e.name + (e.formLabel ? ` · ${e.formLabel}` : '')));
   mid.append(title);
-  const detailText = verdict === 'ready' && p ? `catch in ${gameLabel(p.via) ?? p.via}`
+  const detailText = stopGameId ? howWhereText(e, stopGameId)
+    : verdict === 'ready' && p ? `catch in ${gameLabel(p.via) ?? p.via}`
     : verdict === 'need-game' && p ? `acquire ${formatNeeds(p.needs)}`
     : verdict === 'have' ? 'in your dex'
     : verdict === 'event-only' ? 'event-only distribution'
     : 'no known route yet';
-  mid.append(elem('span', { fontSize: '11.5px', color: T.muted, lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, detailText));
+  const detail = elem('span', { fontSize: '11.5px', color: T.muted, lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, detailText);
+  detail.className = 'row-how';
+  mid.append(detail);
 
   const pill = elem('span', {
     flexShrink: 0, display: 'inline-flex', alignItems: 'center', minHeight: '24px', padding: '0 10px', borderRadius: '999px',
@@ -752,14 +795,14 @@ function acqChip(active, label, onClick) {
 
 function setAcquire(field, value) {
   state[field] = value;
-  state.acqStepFilter = null; state.acqStepKeys = null; // the itinerary changes
+  state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null; // the itinerary changes
   try { localStorage.setItem(field === 'acquireMode' ? ACQ_MODE_KEY : ACQ_RANK_KEY, value); } catch { /* ignore */ }
   loadAcquire().then(() => { if (state.view === 'planner') renderPlanner(); });
 }
 
 function setGoalScope(value) {
   state.goalScope = value;
-  state.acqStepFilter = null; state.acqStepKeys = null; state.planFilter = 'all';
+  state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null; state.planFilter = 'all';
   try { localStorage.setItem(SCOPE_KEY, value); } catch { /* ignore */ }
   if (state.view === 'planner') renderPlanner(); // show the chip flip while the plan reloads
   Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); });
@@ -775,7 +818,7 @@ function setDexView(value) {
 // One preference, two surfaces: the grid re-renders immediately, the plan reloads.
 function setGenderPref(value) {
   state.genderPref = value;
-  state.acqStepFilter = null; state.acqStepKeys = null;
+  state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null;
   invalidateScope();
   try { localStorage.setItem(GENDER_KEY, value); } catch { /* ignore */ }
   render();
@@ -883,6 +926,17 @@ function acquireSection() {
         state.acqStepFilter = state.acqStepFilter === step.id ? null : step.id;
         state.acqStepKeys = state.acqStepFilter ? new Set(step.entryKeys) : null;
         state.acqStepLabel = step.label;
+        // Companion checklist: everything else you still need that's ALSO
+        // catchable in this game (beyond what the optimizer assigned here).
+        // Snapshotted at tap time so ticking catches doesn't reshuffle the list.
+        state.acqStepExtraKeys = state.acqStepFilter
+          ? new Set(state.entries
+              .filter((e) => !isCaught(e)
+                && !state.acqStepKeys.has(e.entryKey)
+                && ['ready', 'need-game'].includes(state.plan[e.entryKey]?.verdict)
+                && hasEnrichment(e) && e.availability.some((a) => a.gameId === step.id))
+              .map((e) => e.entryKey))
+          : null;
         renderPlanner();
       });
     }
@@ -951,26 +1005,49 @@ function renderPlanner() {
   // the active verdict-tile filter.
   const listWrap = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
   const byStop = Boolean(state.acqStepFilter && state.acqStepKeys);
-  const label = byStop ? `CATCH IN ${state.acqStepLabel.toUpperCase()}`
+  const extraCount = byStop && state.acqStepExtraKeys ? state.acqStepExtraKeys.size : 0;
+  const label = byStop ? `CATCH IN ${state.acqStepLabel.toUpperCase()} — ${state.acqStepKeys.size} PLANNED${extraCount ? ` · ${extraCount} MORE POSSIBLE` : ''}`
     : state.planFilter === 'all' ? 'ALL SPECIES'
     : (VERDICT_META[state.planFilter]?.label ?? state.planFilter).toUpperCase();
   const header = elem('div', { display: 'flex', alignItems: 'center', gap: '8px' });
   header.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, label));
   if (byStop || state.planFilter !== 'all') {
     const clear = elem('button', null, 'show all'); clear.type = 'button'; clear.className = 'clear-types';
-    clear.addEventListener('click', () => { state.planFilter = 'all'; state.acqStepFilter = null; state.acqStepKeys = null; renderPlanner(); });
+    clear.addEventListener('click', () => { state.planFilter = 'all'; state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null; renderPlanner(); });
     header.append(clear);
   }
   listWrap.append(header);
 
+  const bySort = (a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey);
+  if (byStop) {
+    // Companion checklist: the stop's assigned species, then everything else
+    // you still need that's also catchable in this game.
+    const stopId = state.acqStepFilter;
+    const assigned = state.entries.filter((e) => state.acqStepKeys.has(e.entryKey)).sort(bySort);
+    const extras = state.entries.filter((e) => state.acqStepExtraKeys && state.acqStepExtraKeys.has(e.entryKey)).sort(bySort);
+    const frag = document.createDocumentFragment();
+    for (const e of assigned.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
+    if (extras.length) {
+      const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
+        `ALSO CATCHABLE HERE (${extras.length}) — planned for other stops`);
+      sub.dataset.role = 'also-here';
+      frag.append(sub);
+      for (const e of extras.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
+    }
+    listWrap.append(frag);
+    if (assigned.length === 0 && extras.length === 0) {
+      listWrap.append(elem('div', { padding: '24px', textAlign: 'center', fontSize: '13px', color: T.muted }, 'Nothing left to catch here.'));
+    }
+    root.append(listWrap);
+    return;
+  }
+
   // The species list follows the PLAN's goal scope: the server only returns
   // verdicts for in-scope slots, so plan membership is the filter.
   const filtered = state.entries
-    .filter((e) => byStop
-      ? state.acqStepKeys.has(e.entryKey)
-      : (!state.planSummary || state.plan[e.entryKey] !== undefined)
-        && (state.planFilter === 'all' || verdictOf(e) === state.planFilter))
-    .sort((a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey));
+    .filter((e) => (!state.planSummary || state.plan[e.entryKey] !== undefined)
+      && (state.planFilter === 'all' || verdictOf(e) === state.planFilter))
+    .sort(bySort);
   const frag = document.createDocumentFragment();
   for (const e of filtered.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e));
   listWrap.append(frag);
@@ -1277,6 +1354,21 @@ function renderSheetInto(e, refocusCaught) {
       }, b));
       ob.append(row);
     }
+    // How it's reached by evolution (companion hint; trade evos need a partner).
+    if (e.evolveFrom) {
+      const line = elem('div', { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' });
+      line.className = 'evolve-from';
+      line.append(elem('span', {
+        display: 'inline-flex', alignItems: 'center', minHeight: '26px', padding: '0 11px', borderRadius: '999px',
+        background: T.raised, border: `1px solid ${T.border}`,
+        fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', fontWeight: '700', letterSpacing: '0.04em', color: T.text,
+      }, 'EVOLVE FROM'));
+      line.append(elem('span', { fontSize: '13px', color: T.text }, e.evolveFrom.name));
+      if (e.evolveFrom.trade) {
+        line.append(elem('span', { fontSize: '11.5px', color: T.gold, fontWeight: '700' }, 'trade evolution — needs a partner or second device'));
+      }
+      ob.append(line);
+    }
     // Simplest legit route into Pokémon HOME across the games it's available in
     // (ownership-agnostic for now — the planner will make it "with games you own").
     const route = bestHomeRoute(e);
@@ -1313,7 +1405,10 @@ function renderSheetInto(e, refocusCaught) {
           border: `1px solid ${owned ? T.owned : origin ? `color-mix(in oklab, ${c1} 55%, ${T.border})` : T.border}`,
           fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', color: T.text,
         });
-        chip.title = `${a.label} · ${a.method}` + (locked ? ' · shiny-locked' : a.shinyPossible ? ' · shiny possible' : ' · no shinies') + (origin ? ' · origin game' : '') + (owned ? ' · in a game you own' : '');
+        chip.title = `${a.label} · ${a.method}`
+          + (a.locations && a.locations.length ? ` · ${a.locations.join(', ')}` : '')
+          + (locked ? ' · shiny-locked' : a.shinyPossible ? ' · shiny possible' : ' · no shinies')
+          + (origin ? ' · origin game' : '') + (owned ? ' · in a game you own' : '');
         chip.append(elem('span', { fontWeight: '700' }, a.label), elem('span', { opacity: '0.75' }, a.method));
         chip.append(elem('span', {
           color: (a.shinyPossible && !locked) ? `color-mix(in oklab, ${c1} 70%, ${T.text})` : T.muted,

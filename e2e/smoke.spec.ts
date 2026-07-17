@@ -290,9 +290,10 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   await modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]').click();
   await page.keyboard.press('Escape');
 
-  // Now you own Let's Go → it stays as a stop but flips to OWN (still where you catch it)
+  // Now you own Let's Go → it stays as a stop but flips to OWN (still where you
+  // catch it). Ready = Charizard + both Turtwig slots (all reachable via lgpe).
   await expect(planner.locator('.acq-step[data-id="lgpe"]')).toContainText('OWN');
-  await expect(planner.locator('.plan-tile[data-verdict="ready"]')).toContainText('1');
+  await expect(planner.locator('.plan-tile[data-verdict="ready"]')).toContainText('3');
 
   // back to the dex
   await page.locator('#view-btn').click();
@@ -347,6 +348,35 @@ test('gender preference: Distinct only collapses identical pairs, keeps dimorphi
   await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/7 caught');
   await planner.locator('button[data-gender="all"]').click();
   await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/8 caught');
+});
+
+test('companion checklist: how/where lines, also-catchable extras, quick tick-off', async ({ page }) => {
+  await page.locator('#view-btn').click();
+  const planner = page.locator('#planner');
+
+  // Tap the Let's Go stop → checklist: 1 planned (Charizard) + 2 more possible (Turtwig ♂/♀).
+  await planner.locator('.acq-step[data-id="lgpe"]').click();
+  await expect(planner).toContainText("CATCH IN LET'S GO — 1 PLANNED · 2 MORE POSSIBLE");
+  const charRow = planner.locator('.planner-row[data-entry-key="0006-default-male"]');
+  await expect(charRow.locator('.row-how')).toContainText('wild — Route 21, Pallet Town');
+  await expect(planner.locator('[data-role="also-here"]')).toContainText('ALSO CATCHABLE HERE (2)');
+  // Turtwig has no confirmed catch method here → the evolve hint + trade flag shows.
+  await expect(planner.locator('.planner-row[data-entry-key="0387-default-male"] .row-how')).toContainText('evolve from Tradevo · TRADE EVO');
+
+  // Quick tick-off: mark Charizard caught from the row — no sheet needed.
+  await charRow.locator('.row-tick').click();
+  await expect(charRow.locator('.row-tick')).toHaveText('◉');
+
+  // The catch recorded the game as its origin (visible in the detail sheet).
+  await charRow.click();
+  await expect(page.locator('.sheet-panel')).toBeVisible();
+  await expect(page.locator('.sheet-panel input[list="dex-game-suggestions"]')).toHaveValue('Let’s Go'); // gameLabel() uses the curly apostrophe
+  await page.keyboard.press('Escape');
+
+  // The detail sheet also carries the evolve-from hint.
+  await planner.locator('.planner-row[data-entry-key="0387-default-male"]').click();
+  await expect(page.locator('.sheet-panel .evolve-from')).toContainText('Tradevo');
+  await expect(page.locator('.sheet-panel .evolve-from')).toContainText('trade evolution');
 });
 
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {

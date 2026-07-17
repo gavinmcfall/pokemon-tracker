@@ -182,6 +182,15 @@ mock data + localStorage:
   If the itinerary needs Pokémon Bank you don't have, the planner shows a
   reality-check warning: Bank can no longer be newly downloaded (the 3DS eShop
   closed in March 2023), so pre-Switch routes assume it's already installed.
+- **Companion checklist** — tapping a stop shows the species assigned there
+  *plus* an "ALSO CATCHABLE HERE" section (everything else you still need
+  that's available in that game — planned for other stops, but grab it while
+  you're playing). Each row shows **how/where**: `wild — Route 119 (super rod)`
+  from the mirror's encounter data (Gen 1→SwSh; newer games have no encounter
+  tables upstream), or `evolve from <prevo>` with a **TRADE EVO** flag when
+  every evolution path needs a trade. A **quick-tick** button on each row marks
+  the catch without opening the sheet, recording the stop's game as
+  `gameOrigin` (unless one was already set).
   A demand-based greedy set-cover reaches full coverage (handling the Gen-3→4→5→
   Bank chains a naïve greedy would stall on). Below the plan: per-species verdicts
   (**Have / Ready / Need-a-game / Unknown / Event-only**, `GET /api/plan`) with a
