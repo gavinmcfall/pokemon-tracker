@@ -367,11 +367,23 @@ test('companion checklist: how/where lines, also-catchable extras, quick tick-of
   await charRow.locator('.row-tick').click();
   await expect(charRow.locator('.row-tick')).toHaveText('◉');
 
-  // The catch recorded the game as its origin (visible in the detail sheet).
+  // A session catch is in transit: it lands in the TRANSFER BACKLOG under its game.
+  const backlog = planner.locator('.backlog');
+  await expect(backlog).toContainText('TRANSFER BACKLOG — 1 caught, not yet in HOME');
+  await expect(backlog.locator('.backlog-group')).toContainText('Let’s Go — 1 waiting');
+  await expect(backlog.locator('.backlog-group')).toContainText('→ HOME'); // the route reminder
+
+  // The catch recorded the game as its origin, and the sheet shows the transit
+  // state with a toggle.
   await charRow.click();
   await expect(page.locator('.sheet-panel')).toBeVisible();
   await expect(page.locator('.sheet-panel input[list="dex-game-suggestions"]')).toHaveValue('Let’s Go'); // gameLabel() uses the curly apostrophe
+  await expect(page.locator('.sheet-panel .home-toggle')).toContainText('not in HOME');
   await page.keyboard.press('Escape');
+
+  // Bulk "Mark transferred" clears the backlog.
+  await backlog.locator('.backlog-done').click();
+  await expect(planner.locator('.backlog')).toHaveCount(0);
 
   // The detail sheet also carries the evolve-from hint.
   await planner.locator('.planner-row[data-entry-key="0387-default-male"]').click();

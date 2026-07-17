@@ -24,6 +24,10 @@ export interface Status {
   gameOrigin: string | null;
   method: string | null;
   notes: string | null;
+  /** Caught AND banked in Pokémon HOME. False = sitting in `gameOrigin`
+   *  awaiting transfer (the planner's transfer backlog). Meaningless when
+   *  not caught (kept true). */
+  inHome: boolean;
 }
 
 /** IV spread (0..31 each). */
@@ -129,6 +133,7 @@ export interface StatusPatch {
   gameOrigin?: string | null;
   method?: string | null;
   notes?: string | null;
+  inHome?: boolean;
 }
 
 export interface EntryFilters {

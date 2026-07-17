@@ -12,7 +12,7 @@ function entry(dex: number, formSlug: string, gender: string, caught = false, vi
   return {
     entryKey, dex, name: `mon${dex}`, formSlug, formLabel: formSlug === 'default' ? null : formSlug,
     gender: gender as EntryWithStatus['gender'], types: ['normal'], generation: 1, spriteUrl: '', isCosmetic: false,
-    status: caught ? { entryKey, caught: true, caughtAt: null, gameOrigin: null, method: null, notes: null } : null,
+    status: caught ? { entryKey, caught: true, caughtAt: null, gameOrigin: null, method: null, notes: null, inHome: true } : null,
     specimen: null, obtainability: visualDiff ? VIS_DIFF : null,
   };
 }
@@ -107,7 +107,7 @@ describe('gender preference (slotEntries / scopeEntries)', () => {
     expect(all.entries).toHaveLength(4);
 
     // species done → phased lands on phase 3, whose universe honours the pref.
-    const done = GSLOTS.map((e) => ({ ...e, status: { entryKey: e.entryKey, caught: true, caughtAt: null, gameOrigin: null, method: null, notes: null } }));
+    const done = GSLOTS.map((e) => ({ ...e, status: { entryKey: e.entryKey, caught: true, caughtAt: null, gameOrigin: null, method: null, notes: null, inHome: true } }));
     const p3 = scopeEntries(done, 'phased', 'distinct');
     expect(p3.phase).toMatchObject({ n: 3, caught: 4, total: 4 });
     expect(scopeEntries(done, 'phased', 'all').phase).toMatchObject({ n: 3, caught: 5, total: 5 });

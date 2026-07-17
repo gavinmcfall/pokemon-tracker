@@ -187,10 +187,18 @@ mock data + localStorage:
   that's available in that game — planned for other stops, but grab it while
   you're playing). Each row shows **how/where**: `wild — Route 119 (super rod)`
   from the mirror's encounter data (Gen 1→SwSh; newer games have no encounter
-  tables upstream), or `evolve from <prevo>` with a **TRADE EVO** flag when
-  every evolution path needs a trade. A **quick-tick** button on each row marks
-  the catch without opening the sheet, recording the stop's game as
-  `gameOrigin` (unless one was already set).
+  tables upstream, so their dex members read as "catchable here"), or
+  `evolve from <prevo>` with a **TRADE EVO** flag when every evolution path
+  needs a trade. A **quick-tick** button on each row marks the catch without
+  opening the sheet, recording the stop's game as `gameOrigin` (unless one was
+  already set) and flagging it **in transit** (`inHome: false`).
+- **Transfer backlog** — a catch is either banked in HOME (`status.inHome`,
+  default true so HOME imports stay truthful) or sitting in its origin game.
+  Quick-ticked session catches are in transit; the planner shows a
+  **TRANSFER BACKLOG** grouped by game with the HOME route reminder and a bulk
+  **Mark transferred** per game; the detail sheet has an `In HOME / not in
+  HOME` toggle. Releasing a catch resets the flag. Round-trips through CSV
+  export/import (`inHome` column).
   A demand-based greedy set-cover reaches full coverage (handling the Gen-3→4→5→
   Bank chains a naïve greedy would stall on). Below the plan: per-species verdicts
   (**Have / Ready / Need-a-game / Unknown / Event-only**, `GET /api/plan`) with a

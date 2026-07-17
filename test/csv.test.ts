@@ -94,7 +94,7 @@ describe('exportCsv → planImport round trip', () => {
         generation: 1, spriteUrl: 'https://example/6.png', isCosmetic: false,
         status: {
           entryKey: '0006-mega_x-male', caught: true, caughtAt: '2026-07-10T09:12:00.000Z',
-          gameOrigin: 'emu:HeartGold', method: 'bred', notes: 'notes, with "commas"',
+          gameOrigin: 'emu:HeartGold', method: 'bred', notes: 'notes, with "commas"', inHome: false,
         },
         specimen: null, obtainability: null,
       },

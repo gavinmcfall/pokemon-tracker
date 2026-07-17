@@ -24,6 +24,7 @@ interface EntryRow {
   s_game_origin: string | null;
   s_method: string | null;
   s_notes: string | null;
+  s_in_home: boolean | null;
   sp_entry_key: string | null;
   sp_shiny: boolean | null;
   sp_event: boolean | null;
@@ -71,6 +72,7 @@ function rowToEntry(row: EntryRow): EntryWithStatus {
       gameOrigin: row.s_game_origin,
       method: row.s_method,
       notes: row.s_notes,
+      inHome: row.s_in_home ?? true,
     },
     specimen: row.sp_entry_key === null ? null : {
       entryKey: row.sp_entry_key,
@@ -117,6 +119,7 @@ const BASE_SELECT = `
          e.types, e.generation, e.sprite_url, e.is_cosmetic,
          s.caught as s_caught, s.caught_at as s_caught_at,
          s.game_origin as s_game_origin, s.method as s_method, s.notes as s_notes,
+         s.in_home as s_in_home,
          sp.entry_key as sp_entry_key, sp.shiny as sp_shiny, sp.event as sp_event,
          sp.level as sp_level, sp.origin_game as sp_origin_game, sp.met_year as sp_met_year,
          sp.iv_perfect as sp_iv_perfect, sp.ivs as sp_ivs, sp.tera as sp_tera,
@@ -283,12 +286,12 @@ export class PgStore implements Store {
   async setStatus(patch: StatusPatch): Promise<Status | null> {
     const res = await this.pool.query<{
       entry_key: string; caught: boolean; caught_at: Date | null;
-      game_origin: string | null; method: string | null; notes: string | null;
+      game_origin: string | null; method: string | null; notes: string | null; in_home: boolean;
     }>(
-      `insert into status (entry_key, caught, caught_at, game_origin, method, notes)
+      `insert into status (entry_key, caught, caught_at, game_origin, method, notes, in_home)
        select $1, $2,
               case when $2 then now() end,
-              $3::text, $4::text, $5::text
+              $3::text, $4::text, $5::text, $9::boolean
        where exists (select 1 from entries where entry_key = $1)
        on conflict (entry_key) do update set
          caught = excluded.caught,
@@ -300,8 +303,13 @@ export class PgStore implements Store {
          game_origin = case when $6 then excluded.game_origin else status.game_origin end,
          method      = case when $7 then excluded.method      else status.method      end,
          notes       = case when $8 then excluded.notes       else status.notes       end,
+         in_home = case
+           when not excluded.caught then true
+           when $10 then excluded.in_home
+           else status.in_home
+         end,
          updated_at = now()
-       returning entry_key, caught, caught_at, game_origin, method, notes`,
+       returning entry_key, caught, caught_at, game_origin, method, notes, in_home`,
       [
         patch.entryKey,
         patch.caught,
@@ -311,6 +319,8 @@ export class PgStore implements Store {
         patch.gameOrigin !== undefined,
         patch.method !== undefined,
         patch.notes !== undefined,
+        patch.caught ? (patch.inHome ?? true) : true,
+        patch.inHome !== undefined,
       ],
     );
     const row = res.rows[0];
@@ -322,6 +332,7 @@ export class PgStore implements Store {
       gameOrigin: row.game_origin,
       method: row.method,
       notes: row.notes,
+      inHome: row.in_home,
     };
   }
 

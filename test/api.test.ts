@@ -335,6 +335,14 @@ describe('GET /api/plan', () => {
     expect((await get('/api/plan?scope=everything')).status).toBe(400);
   });
 
+  it('status accepts inHome and round-trips it', async () => {
+    const saved = await json(await post('/api/status', { entryKey: '0006-default-male', caught: true, inHome: false, gameOrigin: 'Emerald' }));
+    expect(saved).toMatchObject({ caught: true, inHome: false, gameOrigin: 'Emerald' });
+    expect((await post('/api/status', { entryKey: '0006-default-male', caught: true, inHome: 'yes' })).status).toBe(400);
+    const cleared = await json(await post('/api/status', { entryKey: '0006-default-male', caught: true, inHome: true }));
+    expect(cleared.inHome).toBe(true);
+  });
+
   it('?gender= is validated and echoed (contract fixture has no collapsible pairs)', async () => {
     const body = await json(await get('/api/plan?gender=distinct'));
     expect(body.gender).toBe('distinct');
