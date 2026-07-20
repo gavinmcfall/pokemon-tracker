@@ -144,7 +144,11 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
   box-shadow: inset 0 0 0 1.5px light-dark(#D3D9E0, #2E3742);
 }
 
-.tile { position: relative; }
+/* Stretch each card to its grid row's height so row bottoms stay flush —
+   cards with form labels ("Gigantamax Butterfree") would otherwise leave
+   their neighbours ragged. */
+.tile { position: relative; display: flex; }
+.tile .tile-body { height: 100%; }
 .tile-info {
   position: absolute; top: 2px; right: 2px; width: 34px; height: 34px;
   display: flex; align-items: center; justify-content: center;
