@@ -649,7 +649,9 @@ function tileMarkup(e) {
   const name = elem('span', { fontSize: '13px', fontWeight: '700', color: 'var(--name)', lineHeight: '1.2', textAlign: 'center' }, e.name);
   const mark = genderMark(e.gender);
   if (mark) name.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '600', color: 'var(--num)', marginLeft: '4px' }, mark));
-  const form = elem('span', { fontSize: '10.5px', fontWeight: '400', color: 'var(--name)', opacity: '0.75', lineHeight: '1.15', textAlign: 'center' }, e.formLabel ?? '');
+  // minHeight reserves one label line even when empty, so rows without form
+  // labels don't sit dramatically shorter than rows full of megas/gmax.
+  const form = elem('span', { fontSize: '10.5px', fontWeight: '400', color: 'var(--name)', opacity: '0.75', lineHeight: '1.15', textAlign: 'center', minHeight: '12px' }, e.formLabel ?? '');
 
   // Specimen badges + obtainability hint get their own readable row.
   const hintInfo = tileHint(e);
