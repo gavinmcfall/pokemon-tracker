@@ -347,6 +347,59 @@ function tileStyle(e, isCaught) {
 }
 
 const genderMark = (g) => (g === 'male' ? '♂' : g === 'female' ? '♀' : '');
+
+/* ---------- sprite normalization ----------
+   Source sprites frame their subject wildly differently (classic pixel art is
+   mostly transparent padding; mega/gmax renders fill the frame), so identical
+   <img> boxes LOOK wildly different sizes. Normalize once per unique URL:
+   crop to the opaque bounding box and rescale to fill a fixed canvas, no
+   smoothing (stays crisp pixel art). Cached data-URLs; any failure (CORS
+   taint, decode error) falls back to the original image silently. */
+const SPRITE_BOX = 68;
+const spriteCache = new Map(); // url -> dataURL | null (null = don't retry)
+
+function normalizedSprite(url, imgEl) {
+  const cached = spriteCache.get(url);
+  if (cached) { imgEl.src = cached; return; }
+  if (cached === null) return;
+  const probe = new Image();
+  probe.crossOrigin = 'anonymous';
+  probe.onload = () => {
+    try {
+      const w = probe.naturalWidth, h = probe.naturalHeight;
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(probe, 0, 0);
+      const data = ctx.getImageData(0, 0, w, h).data;
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (data[(y * w + x) * 4 + 3] > 8) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maxX < 0) { spriteCache.set(url, null); return; } // fully transparent
+      const bw = maxX - minX + 1, bh = maxY - minY + 1;
+      const scale = Math.min(SPRITE_BOX / bw, SPRITE_BOX / bh);
+      const out = document.createElement('canvas');
+      out.width = SPRITE_BOX; out.height = SPRITE_BOX;
+      const octx = out.getContext('2d');
+      octx.imageSmoothingEnabled = false;
+      const dw = Math.max(1, Math.round(bw * scale)), dh = Math.max(1, Math.round(bh * scale));
+      octx.drawImage(c, minX, minY, bw, bh, Math.floor((SPRITE_BOX - dw) / 2), SPRITE_BOX - dh, dw, dh);
+      const dataUrl = out.toDataURL();
+      spriteCache.set(url, dataUrl);
+      imgEl.src = dataUrl;
+    } catch { spriteCache.set(url, null); } // tainted canvas etc. — keep original
+  };
+  probe.onerror = () => spriteCache.set(url, null);
+  probe.src = url;
+}
 const isCaught = (e) => Boolean(e.status && e.status.caught);
 /** HOME-derived at-a-glance markers shown on caught tiles. */
 function specimenBadges(e) {
@@ -580,31 +633,40 @@ function tileMarkup(e) {
   btn.setAttribute('aria-pressed', String(c));
   btn.title = `${e.name}${e.formLabel ? ' — ' + e.formLabel : ''} · ${e.types.join(' / ')} · ${c ? 'caught — tap to unmark' : 'needed — tap to mark caught'} · long-press or ⋯ for details`;
 
-  const head = elem('span', { display: 'flex', width: '100%', alignItems: 'center', gap: '4px', paddingRight: '28px' });
+  // Top row stays sparse — number + type dots only — so nothing crowds the ⋯.
+  const head = elem('span', { display: 'flex', width: '100%', alignItems: 'center', gap: '4px', paddingRight: '30px', minHeight: '16px' });
   const num = elem('span', { display: 'inline-flex', alignItems: 'center', gap: '5px', fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', fontWeight: '600', letterSpacing: '0.05em', color: 'var(--num)' });
   num.textContent = '#' + String(e.dex).padStart(4, '0');
   for (const dv of ['--dot1', '--dot2']) num.append(elem('span', { width: '7px', height: '7px', borderRadius: '50%', background: `var(${dv})`, flexShrink: 0 }));
-  const gender = elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '600', color: 'var(--num)' }, genderMark(e.gender));
-  const spacer = elem('span', { flex: '1' });
+  head.append(num, elem('span', { flex: '1' }));
+
+  const img = elem('img', { filter: 'var(--sf)', transition: 'filter 0.25s ease', imageRendering: 'pixelated', margin: '2px 0' });
+  img.src = e.spriteUrl; img.alt = ''; img.width = 68; img.height = 68; img.loading = 'lazy'; img.draggable = false;
+  normalizedSprite(e.spriteUrl, img);
+
+  // Gender rides with the name — ♂/♀ pairs sit side by side in Every-slot view,
+  // so it must stay visible without fighting the corner button for space.
+  const name = elem('span', { fontSize: '13px', fontWeight: '700', color: 'var(--name)', lineHeight: '1.2', textAlign: 'center' }, e.name);
+  const mark = genderMark(e.gender);
+  if (mark) name.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '600', color: 'var(--num)', marginLeft: '4px' }, mark));
+  const form = elem('span', { fontSize: '10.5px', fontWeight: '400', color: 'var(--name)', opacity: '0.75', lineHeight: '1.15', textAlign: 'center' }, e.formLabel ?? '');
+
+  // Specimen badges + obtainability hint get their own readable row.
   const hintInfo = tileHint(e);
-  const hint = elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', fontWeight: '700', letterSpacing: '0.05em', color: 'var(--num)', opacity: '0.85' }, hintInfo.hint);
-  if (hintInfo.title) hint.title = hintInfo.title;
-  const badges = elem('span', { display: 'inline-flex', alignItems: 'center', gap: '2px', fontSize: '11px', lineHeight: '1' });
+  const badges = elem('span', { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontSize: '11px', lineHeight: '1', minHeight: '13px' });
   badges.className = 'tile-badges';
   for (const b of specimenBadges(e)) {
     const bg = elem('span', { filter: b.kind === 'sixiv' ? 'none' : 'saturate(1.1)', color: b.kind === 'sixiv' ? 'var(--dot1)' : 'inherit' }, b.glyph);
     bg.className = 'tile-badge'; bg.dataset.kind = b.kind; bg.title = b.title; bg.setAttribute('aria-label', b.title);
     badges.append(bg);
   }
-  head.append(num, gender, spacer, badges, hint);
+  if (hintInfo.hint) {
+    const hint = elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', fontWeight: '700', letterSpacing: '0.05em', color: 'var(--num)', opacity: '0.85' }, hintInfo.hint);
+    if (hintInfo.title) hint.title = hintInfo.title;
+    badges.append(hint);
+  }
 
-  const img = elem('img', { filter: 'var(--sf)', transition: 'filter 0.25s ease', imageRendering: 'pixelated', margin: '2px 0' });
-  img.src = e.spriteUrl; img.alt = ''; img.width = 68; img.height = 68; img.loading = 'lazy'; img.draggable = false;
-
-  const name = elem('span', { fontSize: '13px', fontWeight: '700', color: 'var(--name)', lineHeight: '1.2', textAlign: 'center' }, e.name);
-  const form = elem('span', { fontSize: '10.5px', fontWeight: '400', color: 'var(--name)', opacity: '0.75', lineHeight: '1.15', textAlign: 'center' }, e.formLabel ?? '');
-
-  btn.append(head, img, name, form);
+  btn.append(head, img, name, form, badges);
   btn.addEventListener('click', () => { if (lp.fired) { lp.fired = false; return; } toggle(e.entryKey); });
   btn.addEventListener('pointerdown', () => startLongPress(e.entryKey));
   btn.addEventListener('pointerup', cancelLongPress);
@@ -771,6 +833,7 @@ function plannerRow(e, stopGameId) {
 
   const img = elem('img', { width: '40px', height: '40px', imageRendering: 'pixelated', flexShrink: 0 });
   img.src = e.spriteUrl; img.alt = ''; img.loading = 'lazy'; img.draggable = false;
+  normalizedSprite(e.spriteUrl, img);
 
   const mid = elem('span', { display: 'flex', flexDirection: 'column', gap: '1px', flex: '1', minWidth: '0' });
   const title = elem('span', { fontSize: '13.5px', fontWeight: '700', color: T.text });
@@ -1270,6 +1333,7 @@ function renderSheetInto(e, refocusCaught) {
   });
   const img = elem('img', { imageRendering: 'pixelated', filter: st.caught ? 'none' : 'grayscale(1) opacity(0.55)' });
   img.src = e.spriteUrl; img.alt = ''; img.width = 72; img.height = 72; img.draggable = false;
+  normalizedSprite(e.spriteUrl, img);
   spriteWrap.append(img);
 
   const title = elem('div', null); title.className = 'sheet-title';
