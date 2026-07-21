@@ -20,6 +20,15 @@ describe('spriteKeyFromUrl', () => {
     expect(spriteKeyFromUrl('https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/666-fancy.png')).toBe('666-fancy.png');
     expect(spriteKeyFromUrl('https://x/10034.png')).toBe('10034.png');
   });
+  it('path variants under sprites/pokemon get distinct keys (HOME renders vs pixel vs female)', () => {
+    const base = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
+    expect(spriteKeyFromUrl(`${base}/other/home/6.png`)).toBe('other-home-6.png');
+    expect(spriteKeyFromUrl(`${base}/other/home/female/25.png`)).toBe('other-home-female-25.png');
+    expect(spriteKeyFromUrl(`${base}/female/25.png`)).toBe('female-25.png');
+    // The three must never collapse onto each other or the plain pixel key.
+    const keys = [`${base}/25.png`, `${base}/female/25.png`, `${base}/other/home/25.png`, `${base}/other/home/female/25.png`].map(spriteKeyFromUrl);
+    expect(new Set(keys).size).toBe(4);
+  });
   it('rejects path traversal and unsafe names', () => {
     expect(spriteKeyFromUrl('https://x/../../etc/passwd')).toBe('passwd'); // basename only, no slashes survive
     expect(spriteKeyFromUrl('https://x/a%2Fb.png')).toBe(null); // decodes to a/b → unsafe
