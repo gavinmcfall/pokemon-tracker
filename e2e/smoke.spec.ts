@@ -359,9 +359,25 @@ test('companion checklist: how/where lines, also-catchable extras, quick tick-of
   await expect(planner).toContainText("CATCH IN LET'S GO — 1 PLANNED · 2 MORE POSSIBLE");
   const charRow = planner.locator('.planner-row[data-entry-key="0006-default-male"]');
   await expect(charRow.locator('.row-how')).toContainText('wild — Route 21, Pallet Town');
+
+  // Default layout is the hunt route: grouped by primary zone, planned and
+  // opportunistic merged, catch-all buckets sunk to the end.
+  await expect(planner.locator('button[data-group="zones"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(planner.locator('.zone-head').first()).toHaveText('ROUTE 21 (1)');
+  await expect(planner.locator('.zone-head').last()).toHaveText('⚡ EVOLVE OR BREED (2)');
+  // The Turtwig pair is planned for SV — here it carries the ALSO pill.
+  await expect(planner.locator('.planner-row[data-entry-key="0387-default-male"] .row-also')).toBeVisible();
+  await expect(charRow.locator('.row-also')).toHaveCount(0); // planned here, no pill
+
+  // BY DEX keeps the classic two-section layout.
+  await planner.locator('button[data-group="dex"]').click();
+  await expect(planner.locator('.zone-head')).toHaveCount(0);
   await expect(planner.locator('[data-role="also-here"]')).toContainText('ALSO CATCHABLE HERE (2)');
   // Turtwig has no confirmed catch method here → the evolve hint + trade flag shows.
   await expect(planner.locator('.planner-row[data-entry-key="0387-default-male"] .row-how')).toContainText('evolve from Tradevo · TRADE EVO');
+  // Back to zones for the rest of the flow (and to leave the default persisted).
+  await planner.locator('button[data-group="zones"]').click();
+  await expect(planner.locator('.zone-head').first()).toBeVisible();
 
   // Quick tick-off: mark Charizard caught from the row — no sheet needed.
   await charRow.locator('.row-tick').click();

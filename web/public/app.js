@@ -94,6 +94,7 @@ const VIA_META = {
 };
 const ACQ_MODE_KEY = 'livingdex-acq-mode';
 const ACQ_RANK_KEY = 'livingdex-acq-rank';
+const ACQ_GROUP_KEY = 'livingdex-acq-group'; // checklist layout: 'zones' | 'dex'
 
 // Goal scopes — what "finishing the dex" means (mirrors src/planner/scope.ts).
 // A species/regional-form group counts as caught when ANY of its slots is.
@@ -162,6 +163,7 @@ const state = {
   acqStepKeys: null,   // Set of entryKeys assigned to that stop
   acqStepExtraKeys: null, // Set of other missing entryKeys also catchable there (snapshot)
   acqStepLabel: '',
+  acqGroupMode: 'zones', // checklist layout: hunt route by zone, or plain dex order
   goalScope: 'phased', // planner GoalScope — what the PLAN counts toward "done"
   planPhase: null,     // {n, of, label, caught, total} from the API when scope is phased
   dexView: 'all',      // dex grid consolidation — display only, independent of goalScope
@@ -803,8 +805,9 @@ function howWhereText(e, gameId) {
 
 // `stopGameId` puts the row in companion-checklist mode: the detail line shows
 // how/where to get it in THAT game, and a quick-tick button marks it caught
-// (recording the game as origin) without opening the sheet.
-function plannerRow(e, stopGameId) {
+// (recording the game as origin) without opening the sheet. `opportunistic`
+// tags rows the optimizer planned for other stops (zone view merges them in).
+function plannerRow(e, stopGameId, opportunistic) {
   const p = state.plan[e.entryKey];
   const verdict = p?.verdict ?? 'unknown';
   const meta = VERDICT_META[verdict] ?? VERDICT_META.unknown;
@@ -867,7 +870,18 @@ function plannerRow(e, stopGameId) {
     fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '700', letterSpacing: '0.04em', color: T.text,
   }, meta.label.toUpperCase());
 
-  row.append(img, mid, pill);
+  row.append(img, mid);
+  if (opportunistic) {
+    const also = elem('span', {
+      flexShrink: 0, display: 'inline-flex', alignItems: 'center', minHeight: '20px', padding: '0 8px', borderRadius: '999px',
+      background: T.raised, border: `1px dashed ${T.border}`,
+      fontFamily: "'IBM Plex Mono', monospace", fontSize: '9.5px', fontWeight: '700', letterSpacing: '0.05em', color: T.muted,
+    }, 'ALSO');
+    also.className = 'row-also';
+    also.title = 'Planned for another stop — but catchable here while you play';
+    row.append(also);
+  }
+  row.append(pill);
   row.addEventListener('click', () => openSheet(e.entryKey));
   return row;
 }
@@ -1190,14 +1204,62 @@ function renderPlanner() {
     const stopId = state.acqStepFilter;
     const assigned = state.entries.filter((e) => state.acqStepKeys.has(e.entryKey)).sort(bySort);
     const extras = state.entries.filter((e) => state.acqStepExtraKeys && state.acqStepExtraKeys.has(e.entryKey)).sort(bySort);
+
+    // Layout toggle: hunt-route (grouped by the primary zone you catch each
+    // species in — clear a zone, move to the next) vs plain dex order.
+    const toggle = elem('div', { display: 'flex', gap: '5px', alignItems: 'center', padding: '2px 0 4px' });
+    toggle.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, 'GROUP:'));
+    for (const g of [{ key: 'zones', label: 'By zone' }, { key: 'dex', label: 'By dex' }]) {
+      const b = acqChip(state.acqGroupMode === g.key, g.label, () => {
+        state.acqGroupMode = g.key;
+        try { localStorage.setItem(ACQ_GROUP_KEY, g.key); } catch { /* ignore */ }
+        renderPlanner();
+      });
+      b.dataset.group = g.key;
+      toggle.append(b);
+    }
+    listWrap.append(toggle);
+
     const frag = document.createDocumentFragment();
-    for (const e of assigned.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
-    if (extras.length) {
-      const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
-        `ALSO CATCHABLE HERE (${extras.length}) — planned for other stops`);
-      sub.dataset.role = 'also-here';
-      frag.append(sub);
-      for (const e of extras.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
+    if (state.acqGroupMode === 'zones') {
+      // One merged list — mid-session you want everything the zone owes you,
+      // planned or not. Each species files under its primary (first) zone.
+      const all = [
+        ...assigned.map((e) => ({ e, opportunistic: false })),
+        ...extras.map((e) => ({ e, opportunistic: true })),
+      ].slice(0, PLANNER_ROW_CAP);
+      const zones = new Map();
+      const EVOLVE = '⚡ Evolve or breed';
+      const NOWHERE = 'No location data';
+      for (const item of all) {
+        const a = hasEnrichment(item.e) ? item.e.availability.find((x) => x.gameId === stopId) : null;
+        const zone = a?.locations?.length ? a.locations[0]
+          : (item.e.evolveFrom && (a?.method === 'available' || a?.method === 'evolve')) ? EVOLVE
+          : NOWHERE;
+        const arr = zones.get(zone);
+        if (arr) arr.push(item); else zones.set(zone, [item]);
+      }
+      // Biggest hunting grounds first; the catch-all buckets always sink to the end.
+      const ordered = [...zones.entries()].sort((a, b) => {
+        const sink = (k) => (k === EVOLVE ? 1 : k === NOWHERE ? 2 : 0);
+        return sink(a[0]) - sink(b[0]) || b[1].length - a[1].length || a[0].localeCompare(b[0]);
+      });
+      for (const [zone, items] of ordered) {
+        const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
+          `${zone.toUpperCase()} (${items.length})`);
+        sub.className = 'zone-head'; sub.dataset.zone = zone;
+        frag.append(sub);
+        for (const { e, opportunistic } of items) frag.append(plannerRow(e, stopId, opportunistic));
+      }
+    } else {
+      for (const e of assigned.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
+      if (extras.length) {
+        const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
+          `ALSO CATCHABLE HERE (${extras.length}) — planned for other stops`);
+        sub.dataset.role = 'also-here';
+        frag.append(sub);
+        for (const e of extras.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
+      }
     }
     listWrap.append(frag);
     if (assigned.length === 0 && extras.length === 0) {
@@ -1916,6 +1978,8 @@ function init() {
     if (DEX_VIEWS.some((v) => v.key === savedView)) state.dexView = savedView;
     const savedGender = localStorage.getItem(GENDER_KEY);
     if (GENDER_PREFS.some((g) => g.key === savedGender)) state.genderPref = savedGender;
+    const savedGroup = localStorage.getItem(ACQ_GROUP_KEY);
+    if (savedGroup === 'zones' || savedGroup === 'dex') state.acqGroupMode = savedGroup;
   } catch { /* ignore */ }
   syncTheme();
 
