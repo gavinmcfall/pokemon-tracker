@@ -46,7 +46,12 @@ export interface RawPokemon {
   name: string;
   is_default: boolean;
   types: { slot: number; type: NamedRef }[];
-  sprites: { front_default: string | null; front_female: string | null };
+  sprites: {
+    front_default: string | null;
+    front_female: string | null;
+    /** High-res Pokémon HOME renders (512px) — preferred for variety-level slots. */
+    other?: { home?: { front_default: string | null; front_female: string | null } | null } | null;
+  };
   forms: NamedRef[];
 }
 

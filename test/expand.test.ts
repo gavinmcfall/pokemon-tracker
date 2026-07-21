@@ -243,6 +243,21 @@ describe('expandSpecies on real PokéAPI fixtures (spec §8 edge cases)', () => 
     }
   });
 
+  it('variety slots prefer the high-res HOME render; cosmetic sibling forms keep their form sprites', () => {
+    const charizard = expandSpecies(bundleFor('charizard', 'full'), 'full');
+    const bySlug = (slug: string) => charizard.find((e) => e.formSlug === slug)!;
+    expect(bySlug('default').spriteUrl).toContain('/other/home/6.png');
+    expect(bySlug('mega_x').spriteUrl).toContain('/other/home/10034.png');
+    expect(bySlug('gmax').spriteUrl).toContain('/other/home/10196.png');
+
+    // Vivillon's pokemon HAS a HOME render in the fixture, but HOME renders are
+    // per pokémon — using it would flatten every pattern into one image. The
+    // sibling-form branch must keep the per-form sprites.
+    const vivillon = expandSpecies(bundleFor('vivillon', 'full'), 'full');
+    expect(vivillon.length).toBeGreaterThan(1);
+    for (const e of vivillon) expect(e.spriteUrl).not.toContain('/other/home/');
+  });
+
   it('every entry has a sprite URL and at least one type', () => {
     for (const sp of ['charizard', 'unown', 'vivillon', 'alcremie', 'meowstic', 'minior', 'pikachu']) {
       for (const e of expandSpecies(bundleFor(sp, 'full'), 'full')) {

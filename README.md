@@ -254,6 +254,14 @@ Policy encoded in `src/seed/expand.ts` (all unit-tested against real PokéAPI da
 - Gender-as-variety species (Meowstic, Indeedee, Basculegion, Oinkologne) and
   gender-as-form species (Frillish, Pyroar) collapse into the gender dimension
   instead of becoming fake forms.
+- **Sprites**: variety-level slots (default forms, megas, gmax, regional
+  forms) prefer the high-res **Pokémon HOME renders**
+  (`sprites/pokemon/other/home/`, 512px) with the classic pixel sprite as
+  fallback; cosmetic sibling forms (Unown letters, Vivillon patterns,
+  Alcremie…) keep their per-form pixel sprites — HOME renders exist per
+  pokémon, so they can't tell the patterns apart. The front-end normalizes
+  either kind into the tile box (smooth downscale for renders,
+  nearest-neighbour upscale for pixel art).
 - Curated **fixed-gender event forms** (`FIXED_GENDER_FORMS` in
   `src/obtainability/curated.ts`) override the species gender ratio: all 8 cap
   Pikachu are ♂-only, Cosplay Pikachu and its costumes ♀-only, Ash-Greninja
