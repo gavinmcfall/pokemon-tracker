@@ -189,6 +189,13 @@ export function expandSpecies(bundle: SpeciesBundle, tier: SeedTier): Entry[] {
     }
 
     const labelForm = pokemon.forms.length > 0 ? forms.get(pokemon.forms[0]!.name) : undefined;
+    // Variety-level slots prefer the high-res Pokémon HOME render (512px);
+    // when HOME has no female render, the female slot reuses the HOME default
+    // rather than mixing in a pixel-art female (style-consistent per species).
+    // Cosmetic sibling forms (the branch above) keep their form sprites — HOME
+    // renders exist per pokémon, so they'd flatten every Vivillon pattern into
+    // the same image.
+    const home = pokemon.sprites.other?.home;
     slots.push({
       formSlug,
       formLabel: formSlug === 'default'
@@ -196,8 +203,8 @@ export function expandSpecies(bundle: SpeciesBundle, tier: SeedTier): Entry[] {
         : (labelForm ? englishName(labelForm.names, `${titleCase(formSlug)} ${name}`) : `${titleCase(formSlug)} ${name}`),
       types: typesOf(pokemon),
       isCosmetic: false,
-      spriteDefault: pokemon.sprites.front_default,
-      spriteFemale: pokemon.sprites.front_female,
+      spriteDefault: home?.front_default ?? pokemon.sprites.front_default,
+      spriteFemale: home?.front_default ? (home.front_female ?? null) : pokemon.sprites.front_female,
       genderOverride,
     });
   }

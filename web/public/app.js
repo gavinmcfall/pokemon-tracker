@@ -356,11 +356,17 @@ const genderMark = (g) => (g === 'male' ? '♂' : g === 'female' ? '♀' : '');
    smoothing (stays crisp pixel art). Cached data-URLs; any failure (CORS
    taint, decode error) falls back to the original image silently. */
 const SPRITE_BOX = 68;
-const spriteCache = new Map(); // url -> dataURL | null (null = don't retry)
+const SPRITE_CANVAS = SPRITE_BOX * 2; // 2× for retina crispness
+const spriteCache = new Map(); // url -> { dataUrl, rendering } | null (null = don't retry)
+
+function applyNormalized(imgEl, entry) {
+  imgEl.src = entry.dataUrl;
+  imgEl.style.imageRendering = entry.rendering;
+}
 
 function normalizedSprite(url, imgEl) {
   const cached = spriteCache.get(url);
-  if (cached) { imgEl.src = cached; return; }
+  if (cached) { applyNormalized(imgEl, cached); return; }
   if (cached === null) return;
   const probe = new Image();
   probe.crossOrigin = 'anonymous';
@@ -385,16 +391,20 @@ function normalizedSprite(url, imgEl) {
       }
       if (maxX < 0) { spriteCache.set(url, null); return; } // fully transparent
       const bw = maxX - minX + 1, bh = maxY - minY + 1;
-      const scale = Math.min(SPRITE_BOX / bw, SPRITE_BOX / bh);
+      const scale = Math.min(SPRITE_CANVAS / bw, SPRITE_CANVAS / bh);
       const out = document.createElement('canvas');
-      out.width = SPRITE_BOX; out.height = SPRITE_BOX;
+      out.width = SPRITE_CANVAS; out.height = SPRITE_CANVAS;
       const octx = out.getContext('2d');
-      octx.imageSmoothingEnabled = false;
+      // Downscaling a big render (HOME art): smooth, high quality. Upscaling
+      // small pixel art: nearest-neighbour so it stays crisp.
+      const smooth = scale < 1;
+      octx.imageSmoothingEnabled = smooth;
+      if (smooth) octx.imageSmoothingQuality = 'high';
       const dw = Math.max(1, Math.round(bw * scale)), dh = Math.max(1, Math.round(bh * scale));
-      octx.drawImage(c, minX, minY, bw, bh, Math.floor((SPRITE_BOX - dw) / 2), SPRITE_BOX - dh, dw, dh);
-      const dataUrl = out.toDataURL();
-      spriteCache.set(url, dataUrl);
-      imgEl.src = dataUrl;
+      octx.drawImage(c, minX, minY, bw, bh, Math.floor((SPRITE_CANVAS - dw) / 2), SPRITE_CANVAS - dh, dw, dh);
+      const entry = { dataUrl: out.toDataURL(), rendering: smooth ? 'auto' : 'pixelated' };
+      spriteCache.set(url, entry);
+      applyNormalized(imgEl, entry);
     } catch { spriteCache.set(url, null); } // tainted canvas etc. — keep original
   };
   probe.onerror = () => spriteCache.set(url, null);
