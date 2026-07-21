@@ -16,13 +16,25 @@ import path from 'node:path';
 
 const KEY_RE = /^[A-Za-z0-9._-]+$/;
 
-/** Stable on-disk filename for a sprite URL: its basename (e.g. "6.png", "666-fancy.png"). */
+/**
+ * Stable on-disk filename for a sprite URL. Keys must distinguish path
+ * variants that share a basename — `pokemon/6.png` (pixel), `pokemon/other/
+ * home/6.png` (HOME render) and `pokemon/female/25.png` are different images —
+ * so everything after the `sprites/pokemon/` root joins into the key:
+ * "6.png", "other-home-6.png", "other-home-female-25.png". URLs without that
+ * root (tests, fallbacks) keep the plain basename, which also matches the
+ * pre-existing on-disk files for default pixel sprites.
+ */
 export function spriteKeyFromUrl(url: string): string | null {
   try {
     const pathname = url.startsWith('http') ? new URL(url).pathname : url;
-    const base = pathname.split('/').filter(Boolean).pop() ?? '';
-    if (!base || !KEY_RE.test(base) || base.includes('..')) return null;
-    return base;
+    const segments = pathname.split('/').filter(Boolean);
+    if (segments.length === 0) return null;
+    const rootIdx = segments.findIndex((s, i) => s === 'sprites' && segments[i + 1] === 'pokemon');
+    const parts = rootIdx !== -1 && rootIdx + 2 < segments.length ? segments.slice(rootIdx + 2) : [segments[segments.length - 1]!];
+    const key = parts.join('-');
+    if (!key || !KEY_RE.test(key) || key.includes('..')) return null;
+    return key;
   } catch {
     return null;
   }
