@@ -80,6 +80,16 @@ test('phone header: filter chrome collapses behind the Filters toggle', async ({
   await expect(page.locator('#gen-chips')).toBeVisible();
   await expect(page.locator('#games-btn')).toBeVisible();
 
+  // expanded, the header scrolls its own overflow (capped to the viewport)
+  // instead of letting swipes scroll the dex behind it
+  const headerScroll = await page.evaluate(() => {
+    const bar = document.querySelector('.topbar');
+    if (!bar) return null;
+    const cs = getComputedStyle(bar);
+    return { overflowY: cs.overflowY, capped: bar.getBoundingClientRect().height <= window.innerHeight + 1 };
+  });
+  expect(headerScroll).toEqual({ overflowY: 'auto', capped: true });
+
   // active filters are surfaced on the collapsed toggle
   await page.locator('.type-row button[data-type="fire"]').click();
   await toggle.click();

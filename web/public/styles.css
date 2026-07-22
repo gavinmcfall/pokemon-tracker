@@ -126,6 +126,15 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
   .topbar:not(.filters-open) .type-row,
   .topbar:not(.filters-open) .obtain-row,
   .topbar:not(.filters-open) .io-extra { display: none; }
+  /* Expanded, the filter stack can be taller than the screen. The header is
+     sticky, so it must scroll itself — otherwise swipes scroll the dex behind
+     it and the bottom filters can never be reached. */
+  .topbar.filters-open {
+    max-height: 100vh;
+    max-height: 100dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 /* chips + tiles get focus rings even though their fills are computed inline */
