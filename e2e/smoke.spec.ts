@@ -130,13 +130,61 @@ test('status and type filters narrow the grid; empty state offers a reset', asyn
   await expect(page.locator(gridButton).first()).toHaveAttribute('data-entry-key', '0150-default-genderless');
 
   // a search with no matches shows the empty state; its action clears filters
+  // INCLUDING the pinned generation (gen resets to ALL: 3 + 4 + 1 = 8 slots)
   await page.locator('.status-chips button[data-status="all"]').click();
   await page.locator('#search').fill('zzzzz');
   await expect(page.locator('#empty')).toBeVisible();
   await expect(page.locator('#results')).toBeHidden();
   await page.locator('#empty-action').click();
   await expect(page.locator('#search')).toHaveValue('');
+  await expect(page.locator('#region')).toHaveText('National');
+  await expect(page.locator(gridButton)).toHaveCount(8);
+});
+
+test('a typed query searches the whole national dex, not just the pinned gen', async ({ page }) => {
+  // Default view is Gen I — Vivillon is Gen VI, but search must still find it.
+  await expect(page.locator('#region')).toHaveText('Kanto');
+  await page.locator('#search').fill('vivillon');
+  await expect(page.locator(gridButton)).toHaveCount(1);
+  await expect(page.locator(gridButton).first()).toHaveAttribute('data-entry-key', '0666-fancy-female');
+  await expect(page.locator('#result-label')).toContainText('SEARCHING ALL GENS');
+  // clearing the query restores the gen scope
+  await page.locator('#search').fill('');
   await expect(page.locator(gridButton)).toHaveCount(3);
+  await expect(page.locator('#result-label')).not.toContainText('SEARCHING ALL GENS');
+});
+
+test('tile toggle shows an Undo toast, and Needed keeps the tile in place', async ({ page }) => {
+  const charizard = page.locator(`${gridButton}[data-entry-key="0006-default-male"]`);
+
+  // Under "Needed", catching must NOT reflow the grid under your finger.
+  await page.locator('.status-chips button[data-status="needed"]').click();
+  await expect(page.locator(gridButton)).toHaveCount(3);
+  await charizard.click();
+  await expect(charizard).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator(gridButton)).toHaveCount(3); // still in place, restyled
+
+  // Undo restores the previous state from the toast.
+  const undo = page.locator('.toast .toast-action');
+  await expect(undo).toBeVisible();
+  await expect(page.locator('.toast')).toContainText('Charizard ♂ — marked caught');
+  await undo.click();
+  await expect(charizard).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#caught')).toHaveText('0');
+
+  // The next explicit render reconciles membership: catch again, switch filter.
+  await charizard.click();
+  await page.locator('.status-chips button[data-status="all"]').click();
+  await page.locator('.status-chips button[data-status="needed"]').click();
+  await expect(page.locator(gridButton)).toHaveCount(2); // now it's gone from Needed
+});
+
+test('the active view survives a reload (planner stays planner)', async ({ page }) => {
+  await page.locator('#view-btn').click();
+  await expect(page.locator('#planner')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('#planner')).toBeVisible();
+  await expect(page.locator('#view-btn')).toHaveText('← Dex');
 });
 
 test('search matches by dex number', async ({ page }) => {

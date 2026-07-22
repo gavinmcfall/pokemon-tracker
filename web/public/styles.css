@@ -120,7 +120,15 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 @media (max-width: 767px) {
   .topbar { padding: 10px 12px; }
   .filters-btn { display: inline-flex; }
+  /* The desktop layout's spacer would steal half the row from the search box. */
+  .filter-row .spacer { display: none; }
   .filter-row .search { flex: 1; width: auto; min-width: 0; }
+  /* With the panel open, gen/status chips share the flex line and would crush
+     the search box to a ~44px circle — give it a full line of its own. */
+  .topbar.filters-open .filter-row .search { flex: 1 1 100%; }
+  /* Anything under 16px makes iOS Safari force-zoom the page on focus and
+     leave it zoomed — brute-force every text control on small screens. */
+  input, select, textarea { font-size: 16px !important; }
   .topbar:not(.filters-open) .gen-chips,
   .topbar:not(.filters-open) .status-chips,
   .topbar:not(.filters-open) .type-row,
@@ -145,7 +153,8 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 .grid .tile-body:focus-visible,
 .grid .tile-info:focus-visible,
 .planner button:focus-visible,
-.planner .planner-row:focus-visible {
+.planner .row-main:focus-visible,
+.planner .row-tick:focus-visible {
   outline: 3px solid light-dark(#E3350D, #F4503B); outline-offset: 2px;
 }
 
@@ -175,7 +184,8 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 .tile { position: relative; display: flex; content-visibility: auto; contain-intrinsic-size: auto 150px; }
 .tile .tile-body { height: 100%; }
 .tile-info {
-  position: absolute; top: 2px; right: 2px; width: 34px; height: 34px;
+  /* 44px minimum touch target — a missed tap here silently toggles caught. */
+  position: absolute; top: 0; right: 0; width: 44px; height: 44px;
   display: flex; align-items: center; justify-content: center;
   border: none; border-radius: 10px; background: transparent;
   color: var(--num); font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 700;
@@ -259,3 +269,10 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
   font-size: 14px; z-index: 60;
 }
 .toast.error { border-color: light-dark(#E3350D, #F4503B); }
+.toast-action {
+  margin-left: 12px; min-height: 32px; padding: 0 12px; border-radius: 999px;
+  border: 1.5px solid light-dark(#E3350D, #F4503B); background: transparent;
+  color: light-dark(#E3350D, #F4503B);
+  font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; font-weight: 700; cursor: pointer;
+}
+.toast-action:hover { background: light-dark(#E3350D, #F4503B); color: #fff; }
