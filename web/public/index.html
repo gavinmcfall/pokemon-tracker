@@ -42,6 +42,9 @@
           <label class="hbtn io-extra" for="import-file">Import<input id="import-file" type="file" accept=".csv,text/csv" hidden></label>
           <button class="hbtn io-extra" id="mirror-btn" type="button" title="Download all sprites to the server for offline use" hidden>Mirror</button>
           <button class="hbtn io-extra" id="theme-btn" type="button" title="Theme">◐ Auto</button>
+          <!-- Phone-only: My Games / Export / Import / Mirror / Theme collapse
+               behind this actions menu — they are not filters. -->
+          <button class="hbtn more-btn" id="more-btn" type="button" aria-label="More actions" aria-expanded="false">⋯</button>
         </div>
       </div>
 
@@ -99,7 +102,18 @@
 
       <!-- Living-dex planner view (built by app.js); toggled by #view-btn -->
       <section class="planner" id="planner" role="region" aria-label="Living-dex planner" hidden></section>
+
+      <!-- Hunt view: the per-game companion checklist as a first-class screen
+           (built by app.js). Entered from a planner stop or the bottom nav. -->
+      <section class="planner hunt" id="hunt" role="region" aria-label="Hunt checklist" hidden></section>
     </main>
+
+    <!-- Phone-only bottom navigation: the two real jobs plus planning. -->
+    <nav class="bottom-nav" aria-label="Main">
+      <button type="button" data-nav="dex" aria-current="page">Dex</button>
+      <button type="button" data-nav="hunt">Hunt</button>
+      <button type="button" data-nav="planner">Plan</button>
+    </nav>
 
     <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
   </div>

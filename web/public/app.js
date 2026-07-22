@@ -95,7 +95,9 @@ const VIA_META = {
 const ACQ_MODE_KEY = 'livingdex-acq-mode';
 const ACQ_RANK_KEY = 'livingdex-acq-rank';
 const ACQ_GROUP_KEY = 'livingdex-acq-group'; // checklist layout: 'zones' | 'dex'
-const APP_VIEW_KEY = 'livingdex-app-view'; // 'dex' | 'planner' — survive mid-session reloads
+const APP_VIEW_KEY = 'livingdex-app-view'; // 'dex' | 'planner' | 'hunt' — survive mid-session reloads
+const HUNT_KEY = 'livingdex-hunt-game'; // the game currently being played (Hunt view)
+const REMAIN_KEY = 'livingdex-hunt-remaining'; // Hunt: show remaining only
 
 // Goal scopes — what "finishing the dex" means (mirrors src/planner/scope.ts).
 // A species/regional-form group counts as caught when ANY of its slots is.
@@ -152,7 +154,13 @@ const state = {
   games: [],
   ownedGroupIds: new Set(),
   transfer: {}, // gameId -> TransferInfo (how that game reaches HOME)
-  view: 'dex', // 'dex' | 'planner'
+  view: 'dex', // 'dex' | 'planner' | 'hunt'
+  huntGameId: null, // Hunt view: the game being played right now (persisted)
+  huntLabel: '',
+  remainingOnly: false, // Hunt: hide already-caught rows
+  planConfigOpen: false, // planner strategy chips disclosure
+  expandedZones: new Set(), // Hunt: user-expanded fully-caught zones
+  collapsedZones: new Set(), // Hunt: user-collapsed zones
   plan: {}, // entryKey -> SpeciesPlan verdict
   planSummary: null,
   acquisitions: [],
@@ -297,6 +305,81 @@ function toast(message, isError, action) {
   el.toast.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.toast.hidden = true; }, action ? 8000 : 6000);
+}
+
+/* ---------- phone bottom sheets (filters / actions) ----------
+   The chip rows and header action buttons live in the topbar markup (desktop
+   shows them inline). On phones a bottom sheet ADOPTS those exact nodes while
+   open and returns them on close, so all existing render/update paths keep
+   working regardless of where the controls currently sit. */
+const utilSheet = { scrim: null, kind: null, homes: new Map(), doneBtn: null, onKey: null };
+
+function openUtilSheet(kind) {
+  if (utilSheet.kind === kind) return;
+  closeUtilSheet();
+  const scrim = document.createElement('div');
+  scrim.className = 'util-scrim';
+  const panel = document.createElement('div');
+  panel.className = `util-sheet ${kind === 'filters' ? 'filter-sheet' : 'actions-sheet'}`;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-label', kind === 'filters' ? 'Filters' : 'Actions');
+  const body = document.createElement('div');
+  body.className = 'util-sheet-body';
+  const adopt = (node, label) => {
+    if (!node) return;
+    utilSheet.homes.set(node, { parent: node.parentNode, next: node.nextSibling });
+    if (label) {
+      const l = document.createElement('div');
+      l.className = 'util-sheet-label'; l.textContent = label;
+      body.append(l);
+    }
+    body.append(node);
+  };
+  if (kind === 'filters') {
+    adopt(el.genChips, 'GENERATION');
+    adopt(el.statusChips, 'STATUS');
+    adopt(el.typeChips, 'TYPES');
+    adopt(el.obtainRow); // carries its own OBTAINABLE label; stays hidden without enrichment
+    const footer = document.createElement('div');
+    footer.className = 'util-sheet-footer';
+    const done = document.createElement('button');
+    done.type = 'button'; done.dataset.role = 'filter-done';
+    done.addEventListener('click', closeUtilSheet);
+    footer.append(done);
+    panel.append(body, footer);
+    utilSheet.doneBtn = done;
+    el.filtersBtn.setAttribute('aria-expanded', 'true');
+  } else {
+    for (const node of el.topbar.querySelectorAll('.io .io-extra')) adopt(node);
+    panel.append(body);
+    el.moreBtn.setAttribute('aria-expanded', 'true');
+  }
+  scrim.addEventListener('click', (ev) => { if (ev.target === scrim) closeUtilSheet(); });
+  utilSheet.onKey = (ev) => { if (ev.key === 'Escape') closeUtilSheet(); };
+  document.addEventListener('keydown', utilSheet.onKey);
+  scrim.append(panel);
+  document.body.append(scrim);
+  utilSheet.scrim = scrim;
+  utilSheet.kind = kind;
+  updateFilterDone();
+}
+
+function closeUtilSheet() {
+  if (!utilSheet.scrim) return;
+  for (const [node, home] of utilSheet.homes) home.parent.insertBefore(node, home.next);
+  utilSheet.homes.clear();
+  document.removeEventListener('keydown', utilSheet.onKey);
+  utilSheet.onKey = null;
+  utilSheet.scrim.remove();
+  utilSheet.scrim = null; utilSheet.kind = null; utilSheet.doneBtn = null;
+  if (el.filtersBtn) el.filtersBtn.setAttribute('aria-expanded', 'false');
+  if (el.moreBtn) el.moreBtn.setAttribute('aria-expanded', 'false');
+}
+
+/** Live result count on the filter sheet's Done button. */
+function updateFilterDone() {
+  if (utilSheet.doneBtn) utilSheet.doneBtn.textContent = `SHOW ${visibleEntries().length} ENTRIES`;
 }
 
 /* ---------- theme ---------- */
@@ -509,6 +592,7 @@ function renderChrome() {
   // Phone Filters toggle: surface how many filters are active while collapsed.
   const fc = state.types.length + (state.status !== 'all' ? 1 : 0) + obtainActiveCount();
   el.filtersBtn.textContent = fc ? `Filters · ${fc}` : 'Filters';
+  updateFilterDone(); // live count while the filter sheet is open
 }
 
 // Dex VIEW consolidation chips — a display choice, deliberately separate from
@@ -774,17 +858,38 @@ function renderGrid() {
   }
 }
 
+function setView(view) {
+  state.view = view;
+  try { localStorage.setItem(APP_VIEW_KEY, view); } catch { /* ignore */ }
+  closeUtilSheet();
+  render();
+  window.scrollTo(0, 0);
+}
+
+function syncBottomNav() {
+  if (!el.bottomNav) return;
+  for (const b of el.bottomNav.querySelectorAll('button[data-nav]')) {
+    if (b.dataset.nav === state.view) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  }
+}
+
 function render() {
-  const planner = state.view === 'planner';
-  el.viewBtn.textContent = planner ? '← Dex' : 'Planner';
-  el.viewBtn.setAttribute('aria-pressed', String(planner));
-  el.planner.hidden = !planner;
-  if (el.filterRow) el.filterRow.hidden = planner;
-  if (el.typeRow) el.typeRow.hidden = planner;
-  if (planner) {
+  const view = state.view;
+  const inDex = view === 'dex';
+  el.viewBtn.textContent = inDex ? 'Planner' : '← Dex';
+  el.viewBtn.setAttribute('aria-pressed', String(!inDex));
+  el.planner.hidden = view !== 'planner';
+  el.hunt.hidden = view !== 'hunt';
+  if (el.filterRow) el.filterRow.hidden = !inDex;
+  if (el.typeRow) el.typeRow.hidden = !inDex;
+  syncBottomNav();
+  // Sticky zone headers pin just below the topbar.
+  document.documentElement.style.setProperty('--topbar-h', `${el.topbar ? el.topbar.offsetHeight : 0}px`);
+  if (!inDex) {
     el.results.hidden = true; el.loading.hidden = true; el.empty.hidden = true; el.obtainRow.hidden = true;
     el.viewRow.hidden = true;
-    renderPlanner();
+    if (view === 'planner') renderPlanner(); else renderHunt();
     return;
   }
   el.viewRow.hidden = state.loading; // lives with the grid; shown once entries render
@@ -880,10 +985,17 @@ function plannerRow(e, stopGameId, opportunistic) {
         if (!(e.status && e.status.gameOrigin)) patch.gameOrigin = gameLabel(stopGameId) ?? stopGameId;
       }
       saveStatus(e.entryKey, patch, { membershipMayChange: true });
-      renderPlanner(); // optimistic state is set synchronously — reflect it now
+      // Update in place — a full rebuild would jump the scroll and eat the
+      // next tap mid-hunt. Counters refresh; membership reconciles later.
+      suppressPlanRerenderUntil = Date.now() + 4000;
+      wrap.replaceWith(plannerRow(e, stopGameId, opportunistic));
+      updateHuntCounters();
       toast(`${e.name}${e.formLabel ? ` · ${e.formLabel}` : ''} — ${!c ? `caught in ${state.acqStepLabel}` : 'marked needed'}`, false, {
         label: 'Undo',
-        onClick: () => { saveStatus(e.entryKey, prev, { membershipMayChange: true }); renderPlanner(); },
+        onClick: () => {
+          saveStatus(e.entryKey, prev, { membershipMayChange: true });
+          if (state.view === 'hunt') renderHunt(); else if (state.view === 'planner') renderPlanner();
+        },
       });
     });
     wrap.append(tick);
@@ -945,7 +1057,7 @@ function setAcquire(field, value) {
   state[field] = value;
   state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null; // the itinerary changes
   try { localStorage.setItem(field === 'acquireMode' ? ACQ_MODE_KEY : ACQ_RANK_KEY, value); } catch { /* ignore */ }
-  loadAcquire().then(() => { if (state.view === 'planner') renderPlanner(); });
+  loadAcquire().then(() => { if (state.view === 'planner') renderPlanner(); else if (state.view === 'hunt') renderHunt(); });
 }
 
 function setGoalScope(value) {
@@ -953,7 +1065,7 @@ function setGoalScope(value) {
   state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null; state.planFilter = 'all';
   try { localStorage.setItem(SCOPE_KEY, value); } catch { /* ignore */ }
   if (state.view === 'planner') renderPlanner(); // show the chip flip while the plan reloads
-  Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); });
+  Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); else if (state.view === 'hunt') renderHunt(); });
 }
 
 function setDexView(value) {
@@ -970,7 +1082,7 @@ function setGenderPref(value) {
   invalidateScope();
   try { localStorage.setItem(GENDER_KEY, value); } catch { /* ignore */ }
   render();
-  Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); });
+  Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); else if (state.view === 'hunt') renderHunt(); });
 }
 
 function genderChips(container) {
@@ -995,17 +1107,7 @@ function acquireSection() {
   const wrap = elem('div', { display: 'flex', flexDirection: 'column', gap: '10px' });
   wrap.className = 'acquire';
   wrap.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, 'COMPLETION PLAN'));
-
-  // Strategy selectors: how you acquire games, and how to order the list.
-  const strat = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
-  const modeRow = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' });
-  modeRow.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, 'ACQUIRE:'));
-  for (const m of ACQUIRE_MODES) { const b = acqChip(state.acquireMode === m.key, m.label, () => setAcquire('acquireMode', m.key)); b.dataset.mode = m.key; modeRow.append(b); }
-  const rankRow = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' });
-  rankRow.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, 'ORDER:'));
-  for (const r of ACQUIRE_RANKS) { const b = acqChip(state.acquireRank === r.key, r.label, () => setAcquire('acquireRank', r.key)); b.dataset.rank = r.key; rankRow.append(b); }
-  strat.append(modeRow, rankRow);
-  wrap.append(strat);
+  // ACQUIRE/ORDER strategy chips live in the PLAN SETTINGS disclosure now.
 
   const plan = state.acquirePlan;
   if (!plan) { wrap.append(elem('div', { padding: '16px', textAlign: 'center', color: T.muted, fontSize: '13px' }, 'Computing plan…')); return wrap; }
@@ -1028,7 +1130,7 @@ function acquireSection() {
   const list = elem('div', { display: 'flex', flexDirection: 'column', gap: '6px' });
   let n = 0;
   for (const step of plan.steps) {
-    const selected = !step.prereq && state.acqStepFilter === step.id;
+    const selected = !step.prereq && state.huntGameId === step.id;
     const rowEl = elem('button', {
       display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 12px', borderRadius: '10px',
       cursor: step.prereq ? 'default' : 'pointer', font: 'inherit', textAlign: 'left',
@@ -1070,23 +1172,8 @@ function acquireSection() {
       step.prereq ? 'transfer' : `catch ${step.catchCount}`));
 
     if (!step.prereq) {
-      rowEl.addEventListener('click', () => {
-        state.acqStepFilter = state.acqStepFilter === step.id ? null : step.id;
-        state.acqStepKeys = state.acqStepFilter ? new Set(step.entryKeys) : null;
-        state.acqStepLabel = step.label;
-        // Companion checklist: everything else you still need that's ALSO
-        // catchable in this game (beyond what the optimizer assigned here).
-        // Snapshotted at tap time so ticking catches doesn't reshuffle the list.
-        state.acqStepExtraKeys = state.acqStepFilter
-          ? new Set(state.entries
-              .filter((e) => !isCaught(e)
-                && !state.acqStepKeys.has(e.entryKey)
-                && ['ready', 'need-game'].includes(state.plan[e.entryKey]?.verdict)
-                && hasEnrichment(e) && e.availability.some((a) => a.gameId === step.id))
-              .map((e) => e.entryKey))
-          : null;
-        renderPlanner();
-      });
+      // A stop IS a hunt — tapping it opens the game's catch checklist screen.
+      rowEl.addEventListener('click', () => enterHunt(step));
     }
     list.append(rowEl);
   }
@@ -1185,16 +1272,48 @@ function renderPlanner() {
   if (!s) { root.append(elem('div', { padding: '48px 0', textAlign: 'center', color: T.muted }, 'Planner data unavailable — is the API reachable?')); return; }
 
   root.append(elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '700', letterSpacing: '0.1em', color: T.text }, 'LIVING-DEX PLANNER'));
-  root.append(elem('p', { fontSize: '13px', color: T.muted, lineHeight: '1.5', margin: '0' },
-    'The order to play through your games to finish the dex. Pick your goal and how you’d get missing games below; set what you already own + Bank under “My Games”. Tap a game to see exactly what to catch there.'));
+  // The how-it-works paragraph is first-run guidance — once games are owned,
+  // the returning user shouldn't scroll past it on every visit.
+  if (state.ownedGroupIds.size === 0) {
+    root.append(elem('p', { fontSize: '13px', color: T.muted, lineHeight: '1.5', margin: '0' },
+      'The order to play through your games to finish the dex. Pick your goal and how you’d get missing games below; set what you already own + Bank under “My Games”. Tap a game to open its catch checklist.'));
+  }
 
-  // Goal scope: what "done" means (species / +regional / everything / phased).
-  const goalRow = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' });
-  goalRow.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, 'GOAL:'));
-  for (const g of GOAL_SCOPES) { const b = acqChip(state.goalScope === g.key, g.label, () => setGoalScope(g.key)); b.dataset.scope = g.key; goalRow.append(b); }
-  goalRow.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, margin: '0 2px 0 10px' }, 'GENDERS:'));
-  for (const g of GENDER_PREFS) { const b = acqChip(state.genderPref === g.key, g.label, () => setGenderPref(g.key)); b.dataset.gender = g.key; goalRow.append(b); }
-  root.append(goalRow);
+  // Plan settings are set-once decisions — collapse them behind a one-line
+  // summary so the itinerary (what changes every session) leads.
+  const scopeLabel = GOAL_SCOPES.find((g) => g.key === state.goalScope)?.label ?? state.goalScope;
+  const genderLabel = GENDER_PREFS.find((g) => g.key === state.genderPref)?.label ?? state.genderPref;
+  const modeLabel = ACQUIRE_MODES.find((m) => m.key === state.acquireMode)?.label ?? state.acquireMode;
+  const rankLabel = ACQUIRE_RANKS.find((r) => r.key === state.acquireRank)?.label ?? state.acquireRank;
+  const cfgBtn = elem('button', {
+    display: 'flex', alignItems: 'center', gap: '8px', width: '100%', minHeight: '44px', padding: '0 12px',
+    borderRadius: '10px', cursor: 'pointer', font: 'inherit', textAlign: 'left',
+    background: T.card, border: `1px solid ${T.border}`,
+    fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', fontWeight: '600', letterSpacing: '0.04em', color: T.muted,
+  }, `${state.planConfigOpen ? '▾' : '▸'} PLAN SETTINGS — ${scopeLabel} · ${genderLabel} genders · ${modeLabel} · ${rankLabel}`);
+  cfgBtn.type = 'button'; cfgBtn.dataset.role = 'plan-config';
+  cfgBtn.setAttribute('aria-expanded', String(state.planConfigOpen));
+  cfgBtn.addEventListener('click', () => { state.planConfigOpen = !state.planConfigOpen; renderPlanner(); });
+  root.append(cfgBtn);
+
+  if (state.planConfigOpen) {
+    const cfg = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px', padding: '4px 2px' });
+    const chipRow = (label) => {
+      const r = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' });
+      r.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, label));
+      return r;
+    };
+    const goalRow = chipRow('GOAL:');
+    for (const g of GOAL_SCOPES) { const b = acqChip(state.goalScope === g.key, g.label, () => setGoalScope(g.key)); b.dataset.scope = g.key; goalRow.append(b); }
+    const genderRow = chipRow('GENDERS:');
+    for (const g of GENDER_PREFS) { const b = acqChip(state.genderPref === g.key, g.label, () => setGenderPref(g.key)); b.dataset.gender = g.key; genderRow.append(b); }
+    const modeRow = chipRow('ACQUIRE:');
+    for (const m of ACQUIRE_MODES) { const b = acqChip(state.acquireMode === m.key, m.label, () => setAcquire('acquireMode', m.key)); b.dataset.mode = m.key; modeRow.append(b); }
+    const rankRow = chipRow('ORDER:');
+    for (const r of ACQUIRE_RANKS) { const b = acqChip(state.acquireRank === r.key, r.label, () => setAcquire('acquireRank', r.key)); b.dataset.rank = r.key; rankRow.append(b); }
+    cfg.append(goalRow, genderRow, modeRow, rankRow);
+    root.append(cfg);
+  }
 
   // Scope progress: phase banner (phased) or a plain caught-of-goal line.
   const ph = state.planPhase;
@@ -1224,95 +1343,21 @@ function renderPlanner() {
   );
   root.append(tiles);
 
-  // Species list — either the species to catch at a tapped itinerary stop, or
-  // the active verdict-tile filter.
+  // Species list under the active verdict-tile filter. (The per-game catch
+  // checklist is its own screen now — the Hunt view.)
   const listWrap = elem('div', { display: 'flex', flexDirection: 'column', gap: '8px' });
-  const byStop = Boolean(state.acqStepFilter && state.acqStepKeys);
-  const extraCount = byStop && state.acqStepExtraKeys ? state.acqStepExtraKeys.size : 0;
-  const label = byStop ? `CATCH IN ${state.acqStepLabel.toUpperCase()} — ${state.acqStepKeys.size} PLANNED${extraCount ? ` · ${extraCount} MORE POSSIBLE` : ''}`
-    : state.planFilter === 'all' ? 'ALL SPECIES'
+  const label = state.planFilter === 'all' ? 'ALL SPECIES'
     : (VERDICT_META[state.planFilter]?.label ?? state.planFilter).toUpperCase();
   const header = elem('div', { display: 'flex', alignItems: 'center', gap: '8px' });
   header.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted }, label));
-  if (byStop || state.planFilter !== 'all') {
+  if (state.planFilter !== 'all') {
     const clear = elem('button', null, 'show all'); clear.type = 'button'; clear.className = 'clear-types';
-    clear.addEventListener('click', () => { state.planFilter = 'all'; state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null; renderPlanner(); });
+    clear.addEventListener('click', () => { state.planFilter = 'all'; renderPlanner(); });
     header.append(clear);
   }
   listWrap.append(header);
 
   const bySort = (a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey);
-  if (byStop) {
-    // Companion checklist: the stop's assigned species, then everything else
-    // you still need that's also catchable in this game.
-    const stopId = state.acqStepFilter;
-    const assigned = state.entries.filter((e) => state.acqStepKeys.has(e.entryKey)).sort(bySort);
-    const extras = state.entries.filter((e) => state.acqStepExtraKeys && state.acqStepExtraKeys.has(e.entryKey)).sort(bySort);
-
-    // Layout toggle: hunt-route (grouped by the primary zone you catch each
-    // species in — clear a zone, move to the next) vs plain dex order.
-    const toggle = elem('div', { display: 'flex', gap: '5px', alignItems: 'center', padding: '2px 0 4px' });
-    toggle.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, 'GROUP:'));
-    for (const g of [{ key: 'zones', label: 'By zone' }, { key: 'dex', label: 'By dex' }]) {
-      const b = acqChip(state.acqGroupMode === g.key, g.label, () => {
-        state.acqGroupMode = g.key;
-        try { localStorage.setItem(ACQ_GROUP_KEY, g.key); } catch { /* ignore */ }
-        renderPlanner();
-      });
-      b.dataset.group = g.key;
-      toggle.append(b);
-    }
-    listWrap.append(toggle);
-
-    const frag = document.createDocumentFragment();
-    if (state.acqGroupMode === 'zones') {
-      // One merged list — mid-session you want everything the zone owes you,
-      // planned or not. Each species files under its primary (first) zone.
-      const all = [
-        ...assigned.map((e) => ({ e, opportunistic: false })),
-        ...extras.map((e) => ({ e, opportunistic: true })),
-      ].slice(0, PLANNER_ROW_CAP);
-      const zones = new Map();
-      const EVOLVE = '⚡ Evolve or breed';
-      const NOWHERE = 'No location data';
-      for (const item of all) {
-        const a = hasEnrichment(item.e) ? item.e.availability.find((x) => x.gameId === stopId) : null;
-        const zone = a?.locations?.length ? a.locations[0]
-          : (item.e.evolveFrom && (a?.method === 'available' || a?.method === 'evolve')) ? EVOLVE
-          : NOWHERE;
-        const arr = zones.get(zone);
-        if (arr) arr.push(item); else zones.set(zone, [item]);
-      }
-      // Biggest hunting grounds first; the catch-all buckets always sink to the end.
-      const ordered = [...zones.entries()].sort((a, b) => {
-        const sink = (k) => (k === EVOLVE ? 1 : k === NOWHERE ? 2 : 0);
-        return sink(a[0]) - sink(b[0]) || b[1].length - a[1].length || a[0].localeCompare(b[0]);
-      });
-      for (const [zone, items] of ordered) {
-        const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
-          `${zone.toUpperCase()} (${items.length})`);
-        sub.className = 'zone-head'; sub.dataset.zone = zone;
-        frag.append(sub);
-        for (const { e, opportunistic } of items) frag.append(plannerRow(e, stopId, opportunistic));
-      }
-    } else {
-      for (const e of assigned.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
-      if (extras.length) {
-        const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
-          `ALSO CATCHABLE HERE (${extras.length}) — planned for other stops`);
-        sub.dataset.role = 'also-here';
-        frag.append(sub);
-        for (const e of extras.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
-      }
-    }
-    listWrap.append(frag);
-    if (assigned.length === 0 && extras.length === 0) {
-      listWrap.append(elem('div', { padding: '24px', textAlign: 'center', fontSize: '13px', color: T.muted }, 'Nothing left to catch here.'));
-    }
-    root.append(listWrap);
-    return;
-  }
-
   // The species list follows the PLAN's goal scope: the server only returns
   // verdicts for in-scope slots, so plan membership is the filter.
   const filtered = state.entries
@@ -1332,11 +1377,258 @@ function renderPlanner() {
   root.append(listWrap);
 }
 
+/* ---------- hunt view: the per-game catch checklist as its own screen ---------- */
+
+/** Other missing entries also catchable in this game (beyond the optimizer's picks). */
+function huntExtrasFor(stepId, assignedKeys) {
+  return new Set(state.entries
+    .filter((e) => !isCaught(e)
+      && !assignedKeys.has(e.entryKey)
+      && ['ready', 'need-game'].includes(state.plan[e.entryKey]?.verdict)
+      && hasEnrichment(e) && e.availability.some((a) => a.gameId === stepId))
+    .map((e) => e.entryKey));
+}
+
+function enterHunt(step) {
+  state.huntGameId = step.id;
+  state.huntLabel = step.label;
+  state.acqStepFilter = step.id;
+  state.acqStepLabel = step.label;
+  // Snapshotted at entry so ticking catches doesn't reshuffle the list mid-hunt.
+  state.acqStepKeys = new Set(step.entryKeys);
+  state.acqStepExtraKeys = huntExtrasFor(step.id, state.acqStepKeys);
+  state.expandedZones = new Set();
+  state.collapsedZones = new Set();
+  try { localStorage.setItem(HUNT_KEY, step.id); } catch { /* ignore */ }
+  setView('hunt');
+}
+
+/** Rebuild the hunt snapshot from the current plan (fresh load / plan change). */
+function ensureHuntData() {
+  if (!state.acquirePlan || !state.huntGameId) return false;
+  if (state.acqStepFilter === state.huntGameId && state.acqStepKeys) return true;
+  const step = state.acquirePlan.steps.find((s) => !s.prereq && s.id === state.huntGameId);
+  if (!step) return false;
+  state.huntLabel = step.label;
+  state.acqStepFilter = step.id;
+  state.acqStepLabel = step.label;
+  state.acqStepKeys = new Set(step.entryKeys);
+  state.acqStepExtraKeys = huntExtrasFor(step.id, state.acqStepKeys);
+  return true;
+}
+
+const HUNT_EVOLVE = '⚡ Evolve or breed';
+const HUNT_NOWHERE = 'No location data';
+let huntZoneIndex = new Map(); // zone -> entryKeys[], for in-place counter updates
+
+function huntItems() {
+  const bySort = (a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey);
+  const assigned = state.entries.filter((e) => state.acqStepKeys.has(e.entryKey)).sort(bySort);
+  const extras = state.entries.filter((e) => state.acqStepExtraKeys && state.acqStepExtraKeys.has(e.entryKey)).sort(bySort);
+  return [
+    ...assigned.map((e) => ({ e, opportunistic: false })),
+    ...extras.map((e) => ({ e, opportunistic: true })),
+  ];
+}
+
+function huntChip(label, opts = {}) {
+  const b = acqChip(Boolean(opts.active), label, opts.onClick ?? (() => {}));
+  if (opts.role) b.dataset.role = opts.role;
+  return b;
+}
+
+function renderHunt() {
+  const root = el.hunt;
+  root.replaceChildren();
+  applyStyles(root, { display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '760px', margin: '0 auto' });
+
+  root.append(elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '700', letterSpacing: '0.1em', color: T.text }, 'HUNT'));
+
+  if (!state.acquirePlan) {
+    root.append(elem('div', { padding: '32px 0', textAlign: 'center', color: T.muted, fontSize: '13px' }, 'Computing plan…'));
+    return;
+  }
+
+  const stops = state.acquirePlan.steps.filter((s) => !s.prereq);
+  if (!ensureHuntData()) {
+    // No game selected (or it left the plan) — pick what you're playing.
+    root.append(elem('div', { fontSize: '15px', fontWeight: '700', color: T.text }, 'What are you playing right now?'));
+    if (!stops.length) {
+      root.append(elem('div', { padding: '24px', textAlign: 'center', color: T.muted, fontSize: '13px' }, 'Nothing left to catch that has a known route. 🎉'));
+      return;
+    }
+    const list = elem('div', { display: 'flex', flexDirection: 'column', gap: '6px' });
+    stops.forEach((step, i) => {
+      const b = elem('button', {
+        display: 'flex', alignItems: 'center', gap: '10px', width: '100%', minHeight: '52px', padding: '10px 12px',
+        borderRadius: '10px', cursor: 'pointer', font: 'inherit', textAlign: 'left',
+        background: T.card, border: `1px solid ${T.border}`,
+      });
+      b.type = 'button'; b.className = 'hunt-pick'; b.dataset.id = step.id;
+      b.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '13px', fontWeight: '700', color: T.muted, minWidth: '20px' }, String(i + 1)));
+      b.append(elem('span', { fontSize: '14px', fontWeight: '700', color: T.text, flex: '1' }, step.label));
+      b.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '700', color: T.owned }, `catch ${step.catchCount}`));
+      b.addEventListener('click', () => enterHunt(step));
+      list.append(b);
+    });
+    root.append(list);
+    return;
+  }
+
+  const stopId = state.huntGameId;
+  const all = huntItems();
+  const caughtHere = all.filter((i) => isCaught(i.e)).length;
+  const extraCount = state.acqStepExtraKeys ? state.acqStepExtraKeys.size : 0;
+
+  // Header: what + how far along, then the working controls.
+  root.append(elem('div', { fontSize: '15px', fontWeight: '700', color: T.text, lineHeight: '1.4' },
+    `CATCH IN ${state.acqStepLabel.toUpperCase()} — ${state.acqStepKeys.size} PLANNED${extraCount ? ` · ${extraCount} MORE POSSIBLE` : ''}`));
+  const prog = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '700', letterSpacing: '0.06em', color: T.owned });
+  prog.dataset.role = 'hunt-progress';
+  prog.textContent = `${caughtHere}/${all.length} DONE HERE`;
+  root.append(prog);
+
+  const controls = elem('div', { display: 'flex', flexWrap: 'wrap', gap: '5px', alignItems: 'center' });
+  controls.append(huntChip('← Plan', { role: 'hunt-back', onClick: () => setView('planner') }));
+  controls.append(huntChip('⇄ Game', {
+    role: 'hunt-change',
+    onClick: () => {
+      state.huntGameId = null; state.acqStepFilter = null; state.acqStepKeys = null; state.acqStepExtraKeys = null;
+      try { localStorage.removeItem(HUNT_KEY); } catch { /* ignore */ }
+      renderHunt();
+    },
+  }));
+  controls.append(huntChip('My Games', { role: 'hunt-games', onClick: openGamesModal }));
+  for (const g of [{ key: 'zones', label: 'By zone' }, { key: 'dex', label: 'By dex' }]) {
+    const b = acqChip(state.acqGroupMode === g.key, g.label, () => {
+      state.acqGroupMode = g.key;
+      try { localStorage.setItem(ACQ_GROUP_KEY, g.key); } catch { /* ignore */ }
+      renderHunt();
+    });
+    b.dataset.group = g.key;
+    controls.append(b);
+  }
+  const remain = acqChip(state.remainingOnly, 'Remaining only', () => {
+    state.remainingOnly = !state.remainingOnly;
+    try { localStorage.setItem(REMAIN_KEY, state.remainingOnly ? '1' : '0'); } catch { /* ignore */ }
+    renderHunt();
+  });
+  remain.dataset.role = 'hunt-remaining';
+  controls.append(remain);
+  root.append(controls);
+
+  const frag = document.createDocumentFragment();
+  const shown = all.slice(0, PLANNER_ROW_CAP);
+  huntZoneIndex = new Map();
+
+  if (state.acqGroupMode === 'zones') {
+    // One merged hunt route — each species files under its primary (first)
+    // zone; biggest hunting grounds first, catch-all buckets sink to the end.
+    const zones = new Map();
+    for (const item of shown) {
+      const a = hasEnrichment(item.e) ? item.e.availability.find((x) => x.gameId === stopId) : null;
+      const zone = a?.locations?.length ? a.locations[0]
+        : (item.e.evolveFrom && (a?.method === 'available' || a?.method === 'evolve')) ? HUNT_EVOLVE
+        : HUNT_NOWHERE;
+      const arr = zones.get(zone);
+      if (arr) arr.push(item); else zones.set(zone, [item]);
+    }
+    const ordered = [...zones.entries()].sort((a, b) => {
+      const sink = (k) => (k === HUNT_EVOLVE ? 1 : k === HUNT_NOWHERE ? 2 : 0);
+      return sink(a[0]) - sink(b[0]) || b[1].length - a[1].length || a[0].localeCompare(b[0]);
+    });
+    for (const [zone, items] of ordered) {
+      huntZoneIndex.set(zone, items.map((i) => i.e.entryKey));
+      const caughtN = items.filter((i) => isCaught(i.e)).length;
+      const cleared = caughtN === items.length;
+      // Cleared zones collapse out of the way automatically; any zone can be
+      // toggled by tapping its header.
+      const collapsed = state.collapsedZones.has(zone) || (cleared && !state.expandedZones.has(zone));
+      const sub = elem('div', { display: 'flex', alignItems: 'center', gap: '8px', fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: cleared ? T.owned : T.muted, padding: '10px 0 4px', minHeight: '36px' });
+      sub.className = 'zone-head'; sub.dataset.zone = zone;
+      sub.setAttribute('role', 'button');
+      sub.setAttribute('aria-expanded', String(!collapsed));
+      const chev = elem('span', { fontSize: '10px' }, collapsed ? '▸' : '▾');
+      const count = elem('span', { color: cleared ? T.owned : T.muted });
+      count.dataset.role = 'zone-count';
+      count.textContent = `(${caughtN}/${items.length})`;
+      sub.append(chev, document.createTextNode(` ${zone.toUpperCase()} `), count);
+      if (cleared) sub.append(elem('span', null, '✓'));
+      sub.addEventListener('click', () => {
+        if (collapsed) { state.collapsedZones.delete(zone); state.expandedZones.add(zone); }
+        else { state.collapsedZones.add(zone); state.expandedZones.delete(zone); }
+        renderHunt();
+      });
+      frag.append(sub);
+      if (!collapsed) {
+        for (const { e, opportunistic } of items) {
+          if (state.remainingOnly && isCaught(e)) continue;
+          frag.append(plannerRow(e, stopId, opportunistic));
+        }
+      }
+    }
+  } else {
+    for (const { e, opportunistic } of shown) {
+      if (opportunistic) continue;
+      if (state.remainingOnly && isCaught(e)) continue;
+      frag.append(plannerRow(e, stopId));
+    }
+    const extras = shown.filter((i) => i.opportunistic);
+    if (extras.length) {
+      const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
+        `ALSO CATCHABLE HERE (${extras.length}) — planned for other stops`);
+      sub.dataset.role = 'also-here';
+      frag.append(sub);
+      for (const { e } of extras) {
+        if (state.remainingOnly && isCaught(e)) continue;
+        frag.append(plannerRow(e, stopId, true));
+      }
+    }
+  }
+  root.append(frag);
+
+  if (all.length > PLANNER_ROW_CAP) {
+    // Never truncate silently — say what's hidden and how to narrow.
+    root.append(elem('div', { padding: '10px', textAlign: 'center', fontSize: '12px', color: T.muted },
+      `Showing ${PLANNER_ROW_CAP} of ${all.length} — Remaining only and By dex narrow the list.`));
+  }
+  if (all.length === 0) {
+    root.append(elem('div', { padding: '24px', textAlign: 'center', fontSize: '13px', color: T.muted }, 'Nothing left to catch here. 🎉'));
+  }
+}
+
+/** In-place counter refresh after a quick-tick — no full re-render, no scroll jump. */
+function updateHuntCounters() {
+  const all = state.acqStepKeys ? huntItems() : [];
+  const prog = el.hunt.querySelector('[data-role="hunt-progress"]');
+  if (prog) prog.textContent = `${all.filter((i) => isCaught(i.e)).length}/${all.length} DONE HERE`;
+  const byKey = new Map(all.map((i) => [i.e.entryKey, i.e]));
+  for (const head of el.hunt.querySelectorAll('.zone-head')) {
+    const keys = huntZoneIndex.get(head.dataset.zone);
+    if (!keys) continue;
+    const caughtN = keys.filter((k) => { const e = byKey.get(k); return e && isCaught(e); }).length;
+    const count = head.querySelector('[data-role="zone-count"]');
+    if (count) count.textContent = `(${caughtN}/${keys.length})`;
+  }
+}
+
 /** Refresh planner data after a change that affects routing, then re-render what's visible. */
+let suppressPlanRerenderUntil = 0;
 function refreshPlan() {
   return Promise.all([loadPlan(), loadAcquire()]).then(() => {
-    if (state.view === 'planner') renderPlanner();
-    if (sheet.key) { const e = state.entries.find((x) => x.entryKey === sheet.key); if (e) renderSheetInto(e, false); }
+    // A quick-tick already updated the visible row in place — a full rebuild
+    // seconds later would yank the scroll position mid-hunt.
+    if (Date.now() > suppressPlanRerenderUntil) {
+      if (state.view === 'planner') renderPlanner();
+      if (state.view === 'hunt') renderHunt();
+    }
+    if (sheet.key) {
+      // Never rebuild the sheet under an in-progress edit — replaceChildren
+      // would destroy the focused input and any uncommitted text.
+      const ae = document.activeElement;
+      const editing = sheet.panel && ae && sheet.panel.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+      if (!editing) { const e = state.entries.find((x) => x.entryKey === sheet.key); if (e) renderSheetInto(e, false); }
+    }
   }).catch(() => {});
 }
 
@@ -2028,6 +2320,7 @@ function init() {
     gamesBtn: $('games-btn'), viewBtn: $('view-btn'), planner: $('planner'),
     filterRow: document.querySelector('.filter-row'), typeRow: document.querySelector('.type-row'),
     filtersBtn: $('filters-btn'), topbar: document.querySelector('.topbar'),
+    hunt: $('hunt'), moreBtn: $('more-btn'), bottomNav: document.querySelector('.bottom-nav'),
   });
 
   try {
@@ -2050,7 +2343,10 @@ function init() {
     // Phones discard background tabs mid-session — reopening must not dump a
     // mid-checklist user back on the dex grid.
     const savedAppView = localStorage.getItem(APP_VIEW_KEY);
-    if (savedAppView === 'planner') state.view = 'planner';
+    if (savedAppView === 'planner' || savedAppView === 'hunt') state.view = savedAppView;
+    const savedHunt = localStorage.getItem(HUNT_KEY);
+    if (savedHunt) state.huntGameId = savedHunt;
+    state.remainingOnly = localStorage.getItem(REMAIN_KEY) === '1';
   } catch { /* ignore */ }
   syncTheme();
 
@@ -2060,8 +2356,18 @@ function init() {
 
   el.themeBtn.addEventListener('click', cycleTheme);
   el.filtersBtn.addEventListener('click', () => {
-    const open = el.topbar.classList.toggle('filters-open');
-    el.filtersBtn.setAttribute('aria-expanded', String(open));
+    if (utilSheet.kind === 'filters') closeUtilSheet(); else openUtilSheet('filters');
+  });
+  el.moreBtn.addEventListener('click', () => {
+    if (utilSheet.kind === 'actions') closeUtilSheet(); else openUtilSheet('actions');
+  });
+  if (el.bottomNav) {
+    for (const b of el.bottomNav.querySelectorAll('button[data-nav]')) {
+      b.addEventListener('click', () => setView(b.dataset.nav));
+    }
+  }
+  window.addEventListener('resize', () => {
+    document.documentElement.style.setProperty('--topbar-h', `${el.topbar ? el.topbar.offsetHeight : 0}px`);
   });
   el.emptyAction.addEventListener('click', () => {
     state.status = 'all'; state.query = ''; state.types = []; state.obtain = { owned: false, switch: false, shiny: false, gmax: false, tera: false };
@@ -2078,15 +2384,11 @@ function init() {
   el.importFile.addEventListener('change', () => { const f = el.importFile.files && el.importFile.files[0]; if (f) onImport(f); el.importFile.value = ''; });
   el.mirrorBtn.addEventListener('click', mirrorSprites);
   el.gamesBtn.addEventListener('click', openGamesModal);
-  el.viewBtn.addEventListener('click', () => {
-    state.view = state.view === 'planner' ? 'dex' : 'planner';
-    try { localStorage.setItem(APP_VIEW_KEY, state.view); } catch { /* ignore */ }
-    render();
-  });
+  el.viewBtn.addEventListener('click', () => setView(state.view === 'dex' ? 'planner' : 'dex'));
   pollMirror().catch(() => { el.mirrorBtn.hidden = true; });
   loadGames().then(render);
   loadTransfer().then(() => { if (sheet.key) { const e = state.entries.find((x) => x.entryKey === sheet.key); if (e) renderSheetInto(e, false); } });
-  Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); });
+  Promise.all([loadPlan(), loadAcquire()]).then(() => { if (state.view === 'planner') renderPlanner(); else if (state.view === 'hunt') renderHunt(); });
 
   state.loading = true;
   el.loading.hidden = false; el.results.hidden = true; el.empty.hidden = true;
