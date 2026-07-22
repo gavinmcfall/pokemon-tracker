@@ -436,11 +436,11 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   await expect(planner).toContainText('COMPLETION PLAN');
 
   // itinerary: Let's Go (lgpe) is a catch stop for Charizard default; default mode
-  // is emu-first and it's unowned, so the stop is tagged EMULATE.
+  // is emu-first and it's unowned, so the stop is noted "via emulator".
   const lgpeStep = planner.locator('.acq-step[data-id="lgpe"]');
   await expect(lgpeStep).toBeVisible();
   await expect(lgpeStep).toContainText("Let's Go");
-  await expect(lgpeStep).toContainText('EMULATE');
+  await expect(lgpeStep).toContainText('via emulator');
 
   // tapping the stop opens the Hunt screen with exactly what to catch there
   await lgpeStep.click();
@@ -455,7 +455,7 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   // Cartridge-only re-labels the unowned stop as a cartridge buy
   await planner.locator('button[data-role="plan-config"]').click();
   await planner.locator('button[data-mode="cartridge-only"]').click();
-  await expect(planner.locator('.acq-step[data-id="lgpe"]')).toContainText('BUY CART');
+  await expect(planner.locator('.acq-step[data-id="lgpe"]')).toContainText('buy cartridge');
 
   // My Games: Bank is a service (Active toggle, no cartridge); own Let's Go Pikachu
   await openActions(page);
@@ -587,7 +587,9 @@ test('hunt: how/where lines, zone progress, quick tick-off, transfer backlog', a
   await expect(backlog.locator('.backlog-group')).toContainText('Let’s Go — 1 waiting');
   await expect(backlog.locator('.backlog-group')).toContainText('→ HOME'); // the route reminder
 
-  // Bulk "Mark transferred" clears the backlog.
+  // Bulk "Mark transferred" is a two-tap confirm (it flips every member at once).
+  await backlog.locator('.backlog-done').click();
+  await expect(backlog.locator('.backlog-done')).toContainText('Tap again — move 1 to HOME');
   await backlog.locator('.backlog-done').click();
   await expect(planner.locator('.backlog')).toHaveCount(0);
 
@@ -624,14 +626,57 @@ test('hunt: remaining-only filter and cleared zones collapsing out of the way', 
   await expect(hunt.locator('.planner-row[data-entry-key="0006-default-male"]')).toBeVisible();
 });
 
-test('detail sheet: Escape and scrim click close it', async ({ page }) => {
+test('detail sheet: Escape closes; phones also close via scrim tap', async ({ page }, testInfo) => {
   await page.locator('.grid .tile-info').first().click();
   await expect(page.locator('.sheet-panel')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.sheet-panel')).toHaveCount(0);
 
-  await page.locator('.grid .tile-info').first().click();
-  await expect(page.locator('.sheet-panel')).toBeVisible();
-  await page.locator('.sheet-scrim').click({ position: { x: 5, y: 5 } });
-  await expect(page.locator('.sheet-panel')).toHaveCount(0);
+  if (testInfo.project.name === 'serina') {
+    // Modal on phones — tapping the scrim dismisses.
+    await page.locator('.grid .tile-info').first().click();
+    await expect(page.locator('.sheet-panel')).toBeVisible();
+    await page.locator('.sheet-scrim').click({ position: { x: 5, y: 5 } });
+    await expect(page.locator('.sheet-panel')).toHaveCount(0);
+  }
+});
+
+test('desktop: docked sheet keeps the grid interactive; ‹ › and arrows step entries', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'wide-viewport behaviour only');
+  // Open Charizard's details — on a wide screen the sheet docks to the right
+  // without a blocking scrim.
+  await page.locator(`${gridButton}[data-entry-key="0006-default-male"] ~ .tile-info`).click();
+  const panel = page.locator('.sheet-panel');
+  await expect(panel).toContainText('Charizard');
+
+  // The grid stays interactive: clicking another tile's ⋯ retargets the panel.
+  await page.locator(`${gridButton}[data-entry-key="0150-default-genderless"] ~ .tile-info`).click();
+  await expect(panel).toContainText('Mewtwo');
+
+  // ‹ › step through the visible entries without closing.
+  await panel.locator('[data-role="sheet-prev"]').click();
+  await expect(panel).toContainText('Mega Charizard X');
+  await page.keyboard.press('ArrowRight');
+  await expect(panel).toContainText('Mewtwo');
+  await page.keyboard.press('Escape');
+  await expect(panel).toHaveCount(0);
+});
+
+test('desktop: keyboard layer — "/" focuses search, Escape clears, arrows walk the grid', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop', 'keyboard-first behaviour');
+  await page.keyboard.press('/');
+  await expect(page.locator('#search')).toBeFocused();
+  await page.keyboard.type('mew');
+  await expect(page.locator(gridButton)).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#search')).toHaveValue('');
+  await expect(page.locator(gridButton)).toHaveCount(3);
+
+  // Arrow navigation between tiles; "i" opens details for the focused tile.
+  await page.locator(gridButton).first().focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator(`${gridButton}[data-entry-key="0006-mega_x-male"]`)).toBeFocused();
+  await page.keyboard.press('i');
+  await expect(page.locator('.sheet-panel')).toContainText('Mega Charizard X');
+  await page.keyboard.press('Escape');
 });
