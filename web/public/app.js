@@ -94,6 +94,7 @@ const VIA_META = {
 };
 const ACQ_MODE_KEY = 'livingdex-acq-mode';
 const ACQ_RANK_KEY = 'livingdex-acq-rank';
+const ACQ_GROUP_KEY = 'livingdex-acq-group'; // checklist layout: 'zones' | 'dex'
 
 // Goal scopes — what "finishing the dex" means (mirrors src/planner/scope.ts).
 // A species/regional-form group counts as caught when ANY of its slots is.
@@ -162,6 +163,7 @@ const state = {
   acqStepKeys: null,   // Set of entryKeys assigned to that stop
   acqStepExtraKeys: null, // Set of other missing entryKeys also catchable there (snapshot)
   acqStepLabel: '',
+  acqGroupMode: 'zones', // checklist layout: hunt route by zone, or plain dex order
   goalScope: 'phased', // planner GoalScope — what the PLAN counts toward "done"
   planPhase: null,     // {n, of, label, caught, total} from the API when scope is phased
   dexView: 'all',      // dex grid consolidation — display only, independent of goalScope
@@ -425,7 +427,8 @@ const hasEnrichment = (e) => Array.isArray(e.availability);
 function enrichmentPresent() { return state.entries.some(hasEnrichment); }
 
 /* ---------- selectors ---------- */
-function genEntries() { return state.entries.filter((e) => e.generation === state.gen && inScope(e)); }
+// gen 0 = ALL: the whole national dex at once (browse/search without picking a gen)
+function genEntries() { return state.entries.filter((e) => (state.gen === 0 || e.generation === state.gen) && inScope(e)); }
 function matchesFilters(e) {
   if (state.types.length && !e.types.some((t) => state.types.includes(t))) return false;
   const c = isCaught(e);
@@ -466,7 +469,7 @@ function renderChrome() {
   const caughtCount = scoped.filter(isCaught).length;
   const pct = total ? Math.round((caughtCount / total) * 100) : 0;
 
-  el.region.textContent = REGIONS[state.gen - 1] ?? `Gen ${ROMAN[state.gen - 1] ?? state.gen}`;
+  el.region.textContent = state.gen === 0 ? 'National' : (REGIONS[state.gen - 1] ?? `Gen ${ROMAN[state.gen - 1] ?? state.gen}`);
   el.caught.textContent = String(caughtCount);
   el.total.textContent = `/ ${total}`;
   el.pct.textContent = `${pct}%`;
@@ -489,6 +492,10 @@ function renderChrome() {
   renderTypeChips();
   renderObtain();
   renderViewChips();
+
+  // Phone Filters toggle: surface how many filters are active while collapsed.
+  const fc = state.types.length + (state.status !== 'all' ? 1 : 0) + obtainActiveCount();
+  el.filtersBtn.textContent = fc ? `Filters · ${fc}` : 'Filters';
 }
 
 // Dex VIEW consolidation chips — a display choice, deliberately separate from
@@ -513,23 +520,29 @@ function renderViewChips() {
 
 function renderGenChips() {
   el.genChips.replaceChildren();
-  ROMAN.forEach((r, i) => {
-    const n = i + 1;
-    const active = state.gen === n;
-    const hasData = state.gensAvailable.has(n);
+  const chips = [
+    { n: 0, label: 'ALL', title: 'National dex — every generation at once', hasData: state.gensAvailable.size > 0 },
+    ...ROMAN.map((r, i) => ({
+      n: i + 1, label: r,
+      title: state.gensAvailable.has(i + 1) ? `Generation ${r} — ${REGIONS[i] ?? ''}`.trim() : `Generation ${r} — no data`,
+      hasData: state.gensAvailable.has(i + 1),
+    })),
+  ];
+  for (const c of chips) {
+    const active = state.gen === c.n;
     const btn = elem('button', {
       ...chipBase(), minWidth: '44px', justifyContent: 'center', padding: '0 10px',
       fontFamily: "'IBM Plex Mono', monospace", fontSize: '12.5px', fontWeight: '600',
       background: active ? T.text : T.card, border: `1.5px solid ${active ? T.text : T.border}`,
-      color: active ? T.page : hasData ? T.text : T.muted, opacity: hasData || active ? '1' : '0.55',
-      cursor: hasData ? 'pointer' : 'not-allowed',
-    }, r);
-    btn.type = 'button'; btn.dataset.gen = String(n);
+      color: active ? T.page : c.hasData ? T.text : T.muted, opacity: c.hasData || active ? '1' : '0.55',
+      cursor: c.hasData ? 'pointer' : 'not-allowed',
+    }, c.label);
+    btn.type = 'button'; btn.dataset.gen = String(c.n);
     btn.setAttribute('aria-pressed', String(active));
-    btn.title = hasData ? `Generation ${r} — ${REGIONS[i] ?? ''}`.trim() : `Generation ${r} — no data`;
-    if (!hasData) btn.disabled = true; else btn.addEventListener('click', () => setGen(n));
+    btn.title = c.title;
+    if (!c.hasData) btn.disabled = true; else btn.addEventListener('click', () => setGen(c.n));
     el.genChips.append(btn);
-  });
+  }
 }
 
 function renderStatusChips(caughtCount, total) {
@@ -726,7 +739,7 @@ function renderGrid() {
     if (state.types.length) parts.push(`${state.types.length} type filter${state.types.length > 1 ? 's' : ''}`);
     if (state.status !== 'all') parts.push(`status “${state.status}”`);
     if (obtainActiveCount()) parts.push(`${obtainActiveCount()} obtainability filter${obtainActiveCount() > 1 ? 's' : ''}`);
-    el.emptyTitle.textContent = genEntries().length === 0 ? `Nothing in Gen ${ROMAN[state.gen - 1]} yet` : 'No entries match';
+    el.emptyTitle.textContent = genEntries().length === 0 ? (state.gen === 0 ? 'Nothing seeded yet' : `Nothing in Gen ${ROMAN[state.gen - 1]} yet`) : 'No entries match';
     el.emptyBody.textContent = genEntries().length === 0
       ? 'No entries for this generation have been seeded yet.'
       : (parts.length ? `Your ${parts.join(' + ')} filtered everything out. ` : '') + 'Clear the filters to see the full dex again.';
@@ -803,8 +816,9 @@ function howWhereText(e, gameId) {
 
 // `stopGameId` puts the row in companion-checklist mode: the detail line shows
 // how/where to get it in THAT game, and a quick-tick button marks it caught
-// (recording the game as origin) without opening the sheet.
-function plannerRow(e, stopGameId) {
+// (recording the game as origin) without opening the sheet. `opportunistic`
+// tags rows the optimizer planned for other stops (zone view merges them in).
+function plannerRow(e, stopGameId, opportunistic) {
   const p = state.plan[e.entryKey];
   const verdict = p?.verdict ?? 'unknown';
   const meta = VERDICT_META[verdict] ?? VERDICT_META.unknown;
@@ -867,7 +881,18 @@ function plannerRow(e, stopGameId) {
     fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '700', letterSpacing: '0.04em', color: T.text,
   }, meta.label.toUpperCase());
 
-  row.append(img, mid, pill);
+  row.append(img, mid);
+  if (opportunistic) {
+    const also = elem('span', {
+      flexShrink: 0, display: 'inline-flex', alignItems: 'center', minHeight: '20px', padding: '0 8px', borderRadius: '999px',
+      background: T.raised, border: `1px dashed ${T.border}`,
+      fontFamily: "'IBM Plex Mono', monospace", fontSize: '9.5px', fontWeight: '700', letterSpacing: '0.05em', color: T.muted,
+    }, 'ALSO');
+    also.className = 'row-also';
+    also.title = 'Planned for another stop — but catchable here while you play';
+    row.append(also);
+  }
+  row.append(pill);
   row.addEventListener('click', () => openSheet(e.entryKey));
   return row;
 }
@@ -1190,14 +1215,62 @@ function renderPlanner() {
     const stopId = state.acqStepFilter;
     const assigned = state.entries.filter((e) => state.acqStepKeys.has(e.entryKey)).sort(bySort);
     const extras = state.entries.filter((e) => state.acqStepExtraKeys && state.acqStepExtraKeys.has(e.entryKey)).sort(bySort);
+
+    // Layout toggle: hunt-route (grouped by the primary zone you catch each
+    // species in — clear a zone, move to the next) vs plain dex order.
+    const toggle = elem('div', { display: 'flex', gap: '5px', alignItems: 'center', padding: '2px 0 4px' });
+    toggle.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', letterSpacing: '0.08em', color: T.muted, marginRight: '2px' }, 'GROUP:'));
+    for (const g of [{ key: 'zones', label: 'By zone' }, { key: 'dex', label: 'By dex' }]) {
+      const b = acqChip(state.acqGroupMode === g.key, g.label, () => {
+        state.acqGroupMode = g.key;
+        try { localStorage.setItem(ACQ_GROUP_KEY, g.key); } catch { /* ignore */ }
+        renderPlanner();
+      });
+      b.dataset.group = g.key;
+      toggle.append(b);
+    }
+    listWrap.append(toggle);
+
     const frag = document.createDocumentFragment();
-    for (const e of assigned.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
-    if (extras.length) {
-      const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
-        `ALSO CATCHABLE HERE (${extras.length}) — planned for other stops`);
-      sub.dataset.role = 'also-here';
-      frag.append(sub);
-      for (const e of extras.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
+    if (state.acqGroupMode === 'zones') {
+      // One merged list — mid-session you want everything the zone owes you,
+      // planned or not. Each species files under its primary (first) zone.
+      const all = [
+        ...assigned.map((e) => ({ e, opportunistic: false })),
+        ...extras.map((e) => ({ e, opportunistic: true })),
+      ].slice(0, PLANNER_ROW_CAP);
+      const zones = new Map();
+      const EVOLVE = '⚡ Evolve or breed';
+      const NOWHERE = 'No location data';
+      for (const item of all) {
+        const a = hasEnrichment(item.e) ? item.e.availability.find((x) => x.gameId === stopId) : null;
+        const zone = a?.locations?.length ? a.locations[0]
+          : (item.e.evolveFrom && (a?.method === 'available' || a?.method === 'evolve')) ? EVOLVE
+          : NOWHERE;
+        const arr = zones.get(zone);
+        if (arr) arr.push(item); else zones.set(zone, [item]);
+      }
+      // Biggest hunting grounds first; the catch-all buckets always sink to the end.
+      const ordered = [...zones.entries()].sort((a, b) => {
+        const sink = (k) => (k === EVOLVE ? 1 : k === NOWHERE ? 2 : 0);
+        return sink(a[0]) - sink(b[0]) || b[1].length - a[1].length || a[0].localeCompare(b[0]);
+      });
+      for (const [zone, items] of ordered) {
+        const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
+          `${zone.toUpperCase()} (${items.length})`);
+        sub.className = 'zone-head'; sub.dataset.zone = zone;
+        frag.append(sub);
+        for (const { e, opportunistic } of items) frag.append(plannerRow(e, stopId, opportunistic));
+      }
+    } else {
+      for (const e of assigned.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
+      if (extras.length) {
+        const sub = elem('div', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '600', letterSpacing: '0.12em', color: T.muted, padding: '10px 0 2px' },
+          `ALSO CATCHABLE HERE (${extras.length}) — planned for other stops`);
+        sub.dataset.role = 'also-here';
+        frag.append(sub);
+        for (const e of extras.slice(0, PLANNER_ROW_CAP)) frag.append(plannerRow(e, stopId));
+      }
     }
     listWrap.append(frag);
     if (assigned.length === 0 && extras.length === 0) {
@@ -1843,7 +1916,7 @@ function ingest(entries) {
   state.entries = entries;
   invalidateScope();
   state.gensAvailable = new Set(entries.map((e) => e.generation));
-  if (!state.gensAvailable.has(state.gen)) state.gen = Math.min(...state.gensAvailable) || 1;
+  if (state.gen !== 0 && !state.gensAvailable.has(state.gen)) state.gen = Math.min(...state.gensAvailable) || 1;
 }
 async function reload() { ingest(await api('/api/entries')); }
 
@@ -1899,13 +1972,14 @@ function init() {
     grid: $('grid'), importFile: $('import-file'), toast: $('toast'), mirrorBtn: $('mirror-btn'),
     gamesBtn: $('games-btn'), viewBtn: $('view-btn'), planner: $('planner'),
     filterRow: document.querySelector('.filter-row'), typeRow: document.querySelector('.type-row'),
+    filtersBtn: $('filters-btn'), topbar: document.querySelector('.topbar'),
   });
 
   try {
     const savedTheme = localStorage.getItem(THEME_KEY);
     if (savedTheme === 'auto' || savedTheme === 'light' || savedTheme === 'dark') state.theme = savedTheme;
     const savedGen = parseInt(localStorage.getItem(GEN_KEY) ?? '', 10);
-    if (Number.isInteger(savedGen) && savedGen >= 1 && savedGen <= 9) state.gen = savedGen;
+    if (Number.isInteger(savedGen) && savedGen >= 0 && savedGen <= 9) state.gen = savedGen; // 0 = ALL
     const savedMode = localStorage.getItem(ACQ_MODE_KEY);
     if (ACQUIRE_MODES.some((m) => m.key === savedMode)) state.acquireMode = savedMode;
     const savedRank = localStorage.getItem(ACQ_RANK_KEY);
@@ -1916,6 +1990,8 @@ function init() {
     if (DEX_VIEWS.some((v) => v.key === savedView)) state.dexView = savedView;
     const savedGender = localStorage.getItem(GENDER_KEY);
     if (GENDER_PREFS.some((g) => g.key === savedGender)) state.genderPref = savedGender;
+    const savedGroup = localStorage.getItem(ACQ_GROUP_KEY);
+    if (savedGroup === 'zones' || savedGroup === 'dex') state.acqGroupMode = savedGroup;
   } catch { /* ignore */ }
   syncTheme();
 
@@ -1924,6 +2000,10 @@ function init() {
   el.skeleton.replaceChildren(sk);
 
   el.themeBtn.addEventListener('click', cycleTheme);
+  el.filtersBtn.addEventListener('click', () => {
+    const open = el.topbar.classList.toggle('filters-open');
+    el.filtersBtn.setAttribute('aria-expanded', String(open));
+  });
   el.emptyAction.addEventListener('click', () => {
     state.status = 'all'; state.query = ''; state.types = []; state.obtain = { owned: false, switch: false, shiny: false, gmax: false, tera: false };
     state.gameFilter = ''; el.search.value = ''; render();

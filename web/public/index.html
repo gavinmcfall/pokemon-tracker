@@ -37,11 +37,11 @@
         </div>
         <div class="io">
           <button class="hbtn" id="view-btn" type="button" title="Living-dex planner — what you can get into HOME with the games you own">Planner</button>
-          <button class="hbtn" id="games-btn" type="button" title="Track which games you own — cartridge, emulator or romhack">My Games</button>
-          <a class="hbtn" id="export" href="/api/export" download>Export</a>
-          <label class="hbtn" for="import-file">Import<input id="import-file" type="file" accept=".csv,text/csv" hidden></label>
-          <button class="hbtn" id="mirror-btn" type="button" title="Download all sprites to the server for offline use" hidden>Mirror</button>
-          <button class="hbtn" id="theme-btn" type="button" title="Theme">◐ Auto</button>
+          <button class="hbtn io-extra" id="games-btn" type="button" title="Track which games you own — cartridge, emulator or romhack">My Games</button>
+          <a class="hbtn io-extra" id="export" href="/api/export" download>Export</a>
+          <label class="hbtn io-extra" for="import-file">Import<input id="import-file" type="file" accept=".csv,text/csv" hidden></label>
+          <button class="hbtn io-extra" id="mirror-btn" type="button" title="Download all sprites to the server for offline use" hidden>Mirror</button>
+          <button class="hbtn io-extra" id="theme-btn" type="button" title="Theme">◐ Auto</button>
         </div>
       </div>
 
@@ -52,6 +52,9 @@
         <div class="status-chips" id="status-chips" role="group" aria-label="Status filter"></div>
         <div class="spacer"></div>
         <input class="search" id="search" type="search" aria-label="Search by name or dex number" placeholder="Search name or #">
+        <!-- Phone-only: the filter chrome collapses behind this toggle so the
+             sticky header stays a few rows tall. Hidden on wide screens. -->
+        <button class="hbtn filters-btn" id="filters-btn" type="button" aria-expanded="false">Filters</button>
       </div>
 
       <div class="type-row" id="type-chips" role="group" aria-label="Type filter"></div>

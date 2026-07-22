@@ -5,6 +5,14 @@ import { expect, test } from '@playwright/test';
 // (Charizard default+mega_x, Mewtwo) and one caught Gen VI Vivillon.
 const gridButton = '.grid .tile-body';
 
+// On the phone lane the filter chrome starts collapsed behind the Filters
+// toggle; expand it so the shared specs can reach the gen/type/games controls.
+// The dedicated phone-header spec covers the collapsed default itself.
+async function expandFilters(page: import('@playwright/test').Page): Promise<void> {
+  const toggle = page.locator('#filters-btn');
+  if (await toggle.isVisible()) await toggle.click();
+}
+
 test.beforeEach(async ({ page, request }) => {
   await request.post('/e2e/reset');
   // These specs exercise every slot (forms included); pin the goal scope to
@@ -12,6 +20,7 @@ test.beforeEach(async ({ page, request }) => {
   await page.addInitScript(() => localStorage.setItem('livingdex-goal-scope', 'all'));
   await page.goto('/');
   await expect(page.locator(gridButton).first()).toBeVisible();
+  await expandFilters(page);
 });
 
 test('loads the generation-scoped grid with header progress', async ({ page }) => {
@@ -32,6 +41,50 @@ test('switching generation rescopes the view and shows the caught Vivillon', asy
   await expect(vivillon).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#caught')).toHaveText('1');
   await expect(page.locator('#pct')).toHaveText('100%');
+});
+
+test('ALL generations chip shows the whole national dex and searches across gens', async ({ page }) => {
+  await page.locator('.gen-chips button[data-gen="0"]').click();
+  await expect(page.locator('#region')).toHaveText('National');
+  // every seeded slot at once: 3 Gen I + 4 Gen IV + 1 Gen VI
+  await expect(page.locator(gridButton)).toHaveCount(8);
+  await expect(page.locator('#total')).toHaveText('/ 8');
+
+  // search now spans the whole dex — no gen hopping to find a name
+  await page.locator('#search').fill('vivillon');
+  await expect(page.locator(gridButton)).toHaveCount(1);
+  await expect(page.locator(gridButton).first()).toHaveAttribute('data-entry-key', '0666-fancy-female');
+
+  // the choice persists across reload
+  await page.locator('#search').fill('');
+  await page.reload();
+  await expect(page.locator(gridButton).first()).toBeVisible();
+  await expect(page.locator('#region')).toHaveText('National');
+  await expect(page.locator(gridButton)).toHaveCount(8);
+});
+
+test('phone header: filter chrome collapses behind the Filters toggle', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'serina', 'phone-width behaviour only');
+  // beforeEach expanded the filters — reload to see the collapsed default.
+  await page.reload();
+  await expect(page.locator(gridButton).first()).toBeVisible();
+  await expect(page.locator('#gen-chips')).toBeHidden();
+  await expect(page.locator('#type-chips')).toBeHidden();
+  await expect(page.locator('#games-btn')).toBeHidden();
+  // search and the Planner stay one tap away
+  await expect(page.locator('#search')).toBeVisible();
+  await expect(page.locator('#view-btn')).toBeVisible();
+
+  const toggle = page.locator('#filters-btn');
+  await toggle.click();
+  await expect(page.locator('#gen-chips')).toBeVisible();
+  await expect(page.locator('#games-btn')).toBeVisible();
+
+  // active filters are surfaced on the collapsed toggle
+  await page.locator('.type-row button[data-type="fire"]').click();
+  await toggle.click();
+  await expect(page.locator('#gen-chips')).toBeHidden();
+  await expect(toggle).toHaveText('Filters · 1');
 });
 
 test('toggles caught state and updates the header count', async ({ page }) => {
@@ -253,6 +306,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   // ownership is server-backed: it survives a reload
   await page.reload();
   await expect(page.locator(gridButton).first()).toBeVisible();
+  await expandFilters(page);
   await page.locator('#games-btn').click();
   await expect(page.locator('.games-panel button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
 });
@@ -359,9 +413,25 @@ test('companion checklist: how/where lines, also-catchable extras, quick tick-of
   await expect(planner).toContainText("CATCH IN LET'S GO — 1 PLANNED · 2 MORE POSSIBLE");
   const charRow = planner.locator('.planner-row[data-entry-key="0006-default-male"]');
   await expect(charRow.locator('.row-how')).toContainText('wild — Route 21, Pallet Town');
+
+  // Default layout is the hunt route: grouped by primary zone, planned and
+  // opportunistic merged, catch-all buckets sunk to the end.
+  await expect(planner.locator('button[data-group="zones"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(planner.locator('.zone-head').first()).toHaveText('ROUTE 21 (1)');
+  await expect(planner.locator('.zone-head').last()).toHaveText('⚡ EVOLVE OR BREED (2)');
+  // The Turtwig pair is planned for SV — here it carries the ALSO pill.
+  await expect(planner.locator('.planner-row[data-entry-key="0387-default-male"] .row-also')).toBeVisible();
+  await expect(charRow.locator('.row-also')).toHaveCount(0); // planned here, no pill
+
+  // BY DEX keeps the classic two-section layout.
+  await planner.locator('button[data-group="dex"]').click();
+  await expect(planner.locator('.zone-head')).toHaveCount(0);
   await expect(planner.locator('[data-role="also-here"]')).toContainText('ALSO CATCHABLE HERE (2)');
   // Turtwig has no confirmed catch method here → the evolve hint + trade flag shows.
   await expect(planner.locator('.planner-row[data-entry-key="0387-default-male"] .row-how')).toContainText('evolve from Tradevo · TRADE EVO');
+  // Back to zones for the rest of the flow (and to leave the default persisted).
+  await planner.locator('button[data-group="zones"]').click();
+  await expect(planner.locator('.zone-head').first()).toBeVisible();
 
   // Quick tick-off: mark Charizard caught from the row — no sheet needed.
   await charRow.locator('.row-tick').click();
