@@ -112,6 +112,22 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 }
 .game-select:focus-visible { outline: 3px solid light-dark(#E3350D, #F4503B); outline-offset: 2px; }
 
+/* ---- phone header: collapse the filter chrome behind one toggle ----
+   On a phone the wrapped gen/status/type/obtainability rows would fill the
+   whole viewport (and the header is sticky, so the dex never appears). Keep
+   brand + counts + search + Planner visible; everything else expands on tap. */
+.filters-btn { display: none; }
+@media (max-width: 767px) {
+  .topbar { padding: 10px 12px; }
+  .filters-btn { display: inline-flex; }
+  .filter-row .search { flex: 1; width: auto; min-width: 0; }
+  .topbar:not(.filters-open) .gen-chips,
+  .topbar:not(.filters-open) .status-chips,
+  .topbar:not(.filters-open) .type-row,
+  .topbar:not(.filters-open) .obtain-row,
+  .topbar:not(.filters-open) .io-extra { display: none; }
+}
+
 /* chips + tiles get focus rings even though their fills are computed inline */
 .gen-chips button:focus-visible,
 .status-chips button:focus-visible,
@@ -147,7 +163,7 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 /* Stretch each card to its grid row's height so row bottoms stay flush —
    cards with form labels ("Gigantamax Butterfree") would otherwise leave
    their neighbours ragged. */
-.tile { position: relative; display: flex; }
+.tile { position: relative; display: flex; content-visibility: auto; contain-intrinsic-size: auto 150px; }
 .tile .tile-body { height: 100%; }
 .tile-info {
   position: absolute; top: 2px; right: 2px; width: 34px; height: 34px;

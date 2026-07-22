@@ -427,7 +427,8 @@ const hasEnrichment = (e) => Array.isArray(e.availability);
 function enrichmentPresent() { return state.entries.some(hasEnrichment); }
 
 /* ---------- selectors ---------- */
-function genEntries() { return state.entries.filter((e) => e.generation === state.gen && inScope(e)); }
+// gen 0 = ALL: the whole national dex at once (browse/search without picking a gen)
+function genEntries() { return state.entries.filter((e) => (state.gen === 0 || e.generation === state.gen) && inScope(e)); }
 function matchesFilters(e) {
   if (state.types.length && !e.types.some((t) => state.types.includes(t))) return false;
   const c = isCaught(e);
@@ -468,7 +469,7 @@ function renderChrome() {
   const caughtCount = scoped.filter(isCaught).length;
   const pct = total ? Math.round((caughtCount / total) * 100) : 0;
 
-  el.region.textContent = REGIONS[state.gen - 1] ?? `Gen ${ROMAN[state.gen - 1] ?? state.gen}`;
+  el.region.textContent = state.gen === 0 ? 'National' : (REGIONS[state.gen - 1] ?? `Gen ${ROMAN[state.gen - 1] ?? state.gen}`);
   el.caught.textContent = String(caughtCount);
   el.total.textContent = `/ ${total}`;
   el.pct.textContent = `${pct}%`;
@@ -491,6 +492,10 @@ function renderChrome() {
   renderTypeChips();
   renderObtain();
   renderViewChips();
+
+  // Phone Filters toggle: surface how many filters are active while collapsed.
+  const fc = state.types.length + (state.status !== 'all' ? 1 : 0) + obtainActiveCount();
+  el.filtersBtn.textContent = fc ? `Filters · ${fc}` : 'Filters';
 }
 
 // Dex VIEW consolidation chips — a display choice, deliberately separate from
@@ -515,23 +520,29 @@ function renderViewChips() {
 
 function renderGenChips() {
   el.genChips.replaceChildren();
-  ROMAN.forEach((r, i) => {
-    const n = i + 1;
-    const active = state.gen === n;
-    const hasData = state.gensAvailable.has(n);
+  const chips = [
+    { n: 0, label: 'ALL', title: 'National dex — every generation at once', hasData: state.gensAvailable.size > 0 },
+    ...ROMAN.map((r, i) => ({
+      n: i + 1, label: r,
+      title: state.gensAvailable.has(i + 1) ? `Generation ${r} — ${REGIONS[i] ?? ''}`.trim() : `Generation ${r} — no data`,
+      hasData: state.gensAvailable.has(i + 1),
+    })),
+  ];
+  for (const c of chips) {
+    const active = state.gen === c.n;
     const btn = elem('button', {
       ...chipBase(), minWidth: '44px', justifyContent: 'center', padding: '0 10px',
       fontFamily: "'IBM Plex Mono', monospace", fontSize: '12.5px', fontWeight: '600',
       background: active ? T.text : T.card, border: `1.5px solid ${active ? T.text : T.border}`,
-      color: active ? T.page : hasData ? T.text : T.muted, opacity: hasData || active ? '1' : '0.55',
-      cursor: hasData ? 'pointer' : 'not-allowed',
-    }, r);
-    btn.type = 'button'; btn.dataset.gen = String(n);
+      color: active ? T.page : c.hasData ? T.text : T.muted, opacity: c.hasData || active ? '1' : '0.55',
+      cursor: c.hasData ? 'pointer' : 'not-allowed',
+    }, c.label);
+    btn.type = 'button'; btn.dataset.gen = String(c.n);
     btn.setAttribute('aria-pressed', String(active));
-    btn.title = hasData ? `Generation ${r} — ${REGIONS[i] ?? ''}`.trim() : `Generation ${r} — no data`;
-    if (!hasData) btn.disabled = true; else btn.addEventListener('click', () => setGen(n));
+    btn.title = c.title;
+    if (!c.hasData) btn.disabled = true; else btn.addEventListener('click', () => setGen(c.n));
     el.genChips.append(btn);
-  });
+  }
 }
 
 function renderStatusChips(caughtCount, total) {
@@ -728,7 +739,7 @@ function renderGrid() {
     if (state.types.length) parts.push(`${state.types.length} type filter${state.types.length > 1 ? 's' : ''}`);
     if (state.status !== 'all') parts.push(`status “${state.status}”`);
     if (obtainActiveCount()) parts.push(`${obtainActiveCount()} obtainability filter${obtainActiveCount() > 1 ? 's' : ''}`);
-    el.emptyTitle.textContent = genEntries().length === 0 ? `Nothing in Gen ${ROMAN[state.gen - 1]} yet` : 'No entries match';
+    el.emptyTitle.textContent = genEntries().length === 0 ? (state.gen === 0 ? 'Nothing seeded yet' : `Nothing in Gen ${ROMAN[state.gen - 1]} yet`) : 'No entries match';
     el.emptyBody.textContent = genEntries().length === 0
       ? 'No entries for this generation have been seeded yet.'
       : (parts.length ? `Your ${parts.join(' + ')} filtered everything out. ` : '') + 'Clear the filters to see the full dex again.';
@@ -1905,7 +1916,7 @@ function ingest(entries) {
   state.entries = entries;
   invalidateScope();
   state.gensAvailable = new Set(entries.map((e) => e.generation));
-  if (!state.gensAvailable.has(state.gen)) state.gen = Math.min(...state.gensAvailable) || 1;
+  if (state.gen !== 0 && !state.gensAvailable.has(state.gen)) state.gen = Math.min(...state.gensAvailable) || 1;
 }
 async function reload() { ingest(await api('/api/entries')); }
 
@@ -1961,13 +1972,14 @@ function init() {
     grid: $('grid'), importFile: $('import-file'), toast: $('toast'), mirrorBtn: $('mirror-btn'),
     gamesBtn: $('games-btn'), viewBtn: $('view-btn'), planner: $('planner'),
     filterRow: document.querySelector('.filter-row'), typeRow: document.querySelector('.type-row'),
+    filtersBtn: $('filters-btn'), topbar: document.querySelector('.topbar'),
   });
 
   try {
     const savedTheme = localStorage.getItem(THEME_KEY);
     if (savedTheme === 'auto' || savedTheme === 'light' || savedTheme === 'dark') state.theme = savedTheme;
     const savedGen = parseInt(localStorage.getItem(GEN_KEY) ?? '', 10);
-    if (Number.isInteger(savedGen) && savedGen >= 1 && savedGen <= 9) state.gen = savedGen;
+    if (Number.isInteger(savedGen) && savedGen >= 0 && savedGen <= 9) state.gen = savedGen; // 0 = ALL
     const savedMode = localStorage.getItem(ACQ_MODE_KEY);
     if (ACQUIRE_MODES.some((m) => m.key === savedMode)) state.acquireMode = savedMode;
     const savedRank = localStorage.getItem(ACQ_RANK_KEY);
@@ -1988,6 +2000,10 @@ function init() {
   el.skeleton.replaceChildren(sk);
 
   el.themeBtn.addEventListener('click', cycleTheme);
+  el.filtersBtn.addEventListener('click', () => {
+    const open = el.topbar.classList.toggle('filters-open');
+    el.filtersBtn.setAttribute('aria-expanded', String(open));
+  });
   el.emptyAction.addEventListener('click', () => {
     state.status = 'all'; state.query = ''; state.types = []; state.obtain = { owned: false, switch: false, shiny: false, gmax: false, tera: false };
     state.gameFilter = ''; el.search.value = ''; render();
