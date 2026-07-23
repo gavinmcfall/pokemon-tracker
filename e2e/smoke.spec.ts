@@ -5,11 +5,11 @@ import { expect, test } from '@playwright/test';
 // (Charizard default+mega_x, Mewtwo) and one caught Gen VI Vivillon.
 const gridButton = '.grid .tile-body';
 
-// On the phone lane most filter chrome lives behind the Filters toggle, and
-// while the panel is OPEN it covers the grid (it's a full-height sticky
-// header) — so specs open it around header-control interactions and close it
-// again before touching tiles, mirroring how a phone user actually works.
-// Both helpers no-op on desktop, where everything is always visible.
+// On the phone lane the filter chips live in a bottom sheet behind the
+// Filters toggle, and header actions (My Games, Export, theme…) live behind
+// the ⋯ button. Specs open the right sheet around those interactions and
+// close it before touching the grid, mirroring how a phone user works.
+// All helpers no-op on desktop, where everything is always visible inline.
 type Pg = import('@playwright/test').Page;
 async function openFilters(page: Pg): Promise<void> {
   const t = page.locator('#filters-btn');
@@ -17,7 +17,22 @@ async function openFilters(page: Pg): Promise<void> {
 }
 async function closeFilters(page: Pg): Promise<void> {
   const t = page.locator('#filters-btn');
-  if (await t.isVisible() && (await t.getAttribute('aria-expanded')) === 'true') await t.click();
+  if (await t.isVisible() && (await t.getAttribute('aria-expanded')) === 'true') {
+    await page.locator('.util-sheet [data-role="filter-done"]').click();
+  }
+}
+async function openActions(page: Pg): Promise<void> {
+  const t = page.locator('#more-btn');
+  if (await t.isVisible() && (await t.getAttribute('aria-expanded')) !== 'true') await t.click();
+}
+// Switch top-level view: bottom nav on phones, the header toggle on desktop.
+async function gotoView(page: Pg, view: 'dex' | 'planner' | 'hunt'): Promise<void> {
+  const nav = page.locator(`.bottom-nav button[data-nav="${view}"]`);
+  if (await nav.isVisible()) { await nav.click(); return; }
+  if (view === 'hunt') throw new Error('desktop reaches Hunt via a stop card');
+  const btn = page.locator('#view-btn');
+  const offDex = (await btn.getAttribute('aria-pressed')) === 'true';
+  if (view === 'dex' ? offDex : !offDex) await btn.click();
 }
 
 test.beforeEach(async ({ page, request }) => {
@@ -73,37 +88,50 @@ test('ALL generations chip shows the whole national dex and searches across gens
   await expect(page.locator(gridButton)).toHaveCount(8);
 });
 
-test('phone header: filter chrome collapses behind the Filters toggle', async ({ page }, testInfo) => {
+test('phone chrome: filter bottom sheet, ⋯ actions sheet, slim header', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'serina', 'phone-width behaviour only');
-  // Collapsed is the default state on load.
+  // Slim header by default: no chip rows, no action buttons, no view toggle.
   await expect(page.locator(gridButton).first()).toBeVisible();
   await expect(page.locator('#gen-chips')).toBeHidden();
   await expect(page.locator('#type-chips')).toBeHidden();
   await expect(page.locator('#games-btn')).toBeHidden();
-  // search and the Planner stay one tap away
+  await expect(page.locator('#view-btn')).toBeHidden(); // view switching = bottom nav
+  await expect(page.locator('.bottom-nav')).toBeVisible();
   await expect(page.locator('#search')).toBeVisible();
-  await expect(page.locator('#view-btn')).toBeVisible();
 
-  const toggle = page.locator('#filters-btn');
-  await toggle.click();
-  await expect(page.locator('#gen-chips')).toBeVisible();
-  await expect(page.locator('#games-btn')).toBeVisible();
+  // Filters open as a bottom sheet with a live result-count Done button.
+  await page.locator('#filters-btn').click();
+  const sheet = page.locator('.util-sheet.filter-sheet');
+  await expect(sheet).toBeVisible();
+  await expect(sheet.locator('.gen-chips')).toBeVisible();
+  await expect(sheet.locator('[data-role="filter-done"]')).toHaveText('SHOW 3 ENTRIES');
+  await sheet.locator('.type-row button[data-type="fire"]').click();
+  await expect(sheet.locator('[data-role="filter-done"]')).toHaveText('SHOW 2 ENTRIES');
+  await sheet.locator('[data-role="filter-done"]').click();
+  await expect(page.locator('.util-scrim')).toHaveCount(0);
+  await expect(page.locator(gridButton)).toHaveCount(2);
+  await expect(page.locator('#filters-btn')).toHaveText('Filters · 1');
 
-  // expanded, the header scrolls its own overflow (capped to the viewport)
-  // instead of letting swipes scroll the dex behind it
-  const headerScroll = await page.evaluate(() => {
-    const bar = document.querySelector('.topbar');
-    if (!bar) return null;
-    const cs = getComputedStyle(bar);
-    return { overflowY: cs.overflowY, capped: bar.getBoundingClientRect().height <= window.innerHeight + 1 };
-  });
-  expect(headerScroll).toEqual({ overflowY: 'auto', capped: true });
+  // Header actions live behind ⋯ — they are not filters.
+  await page.locator('#more-btn').click();
+  await expect(page.locator('.util-sheet.actions-sheet #games-btn')).toBeVisible();
+  await expect(page.locator('.util-sheet.actions-sheet #theme-btn')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.util-scrim')).toHaveCount(0);
+});
 
-  // active filters are surfaced on the collapsed toggle
-  await page.locator('.type-row button[data-type="fire"]').click();
-  await toggle.click();
-  await expect(page.locator('#gen-chips')).toBeHidden();
-  await expect(toggle).toHaveText('Filters · 1');
+test('bottom nav: Hunt is first-class and remembers the game across reloads', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'serina', 'phone-width behaviour only');
+  await page.locator('.bottom-nav button[data-nav="hunt"]').click();
+  await expect(page.locator('#hunt')).toBeVisible();
+  await expect(page.locator('#hunt')).toContainText('What are you playing right now?');
+  await page.locator('#hunt .hunt-pick[data-id="lgpe"]').click();
+  await expect(page.locator('#hunt')).toContainText("CATCH IN LET'S GO");
+  // A reload (phones discard tabs constantly) lands straight back in the hunt.
+  await page.reload();
+  await expect(page.locator('#hunt')).toContainText("CATCH IN LET'S GO");
+  await page.locator('.bottom-nav button[data-nav="dex"]').click();
+  await expect(page.locator(gridButton).first()).toBeVisible();
 });
 
 test('toggles caught state and updates the header count', async ({ page }) => {
@@ -197,11 +225,10 @@ test('tile toggle shows an Undo toast, and Needed keeps the tile in place', asyn
 });
 
 test('the active view survives a reload (planner stays planner)', async ({ page }) => {
-  await page.locator('#view-btn').click();
+  await gotoView(page, 'planner');
   await expect(page.locator('#planner')).toBeVisible();
   await page.reload();
   await expect(page.locator('#planner')).toBeVisible();
-  await expect(page.locator('#view-btn')).toHaveText('← Dex');
 });
 
 test('search matches by dex number', async ({ page }) => {
@@ -225,7 +252,7 @@ test('keyboard-only: a tile is reachable and toggleable without a pointer', asyn
 });
 
 test('theme toggle cycles auto → light → dark', async ({ page }) => {
-  await openFilters(page); // theme button lives behind the phone Filters toggle
+  await openActions(page); // theme button lives behind the phone ⋯ menu
   const btn = page.locator('#theme-btn');
   await expect(btn).toHaveText('◐ Auto');
   await btn.click();
@@ -244,7 +271,7 @@ test('no horizontal overflow on a phone viewport', async ({ page }) => {
 
 test('mirror-sprites control mirrors and rewrites tile sprite URLs to local', async ({ page }) => {
   // The harness enables the sprite mirror (fake fetch), so the button shows.
-  await openFilters(page); // mirror button lives behind the phone Filters toggle
+  await openActions(page); // mirror button lives behind the phone ⋯ menu
   const mirror = page.locator('#mirror-btn');
   await expect(mirror).toBeVisible();
   await mirror.click();
@@ -358,7 +385,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   // Pikachu release (versionGroup lgpe) should flag Charizard's chip, reveal the
   // "In a game I own" filter, and (with the filter on) keep Charizard + the
   // unknown Mewtwo while hiding the known-non-match mega_x.
-  await openFilters(page); // My Games lives behind the phone Filters toggle
+  await openActions(page); // My Games lives behind the phone ⋯ menu
   await page.locator('#games-btn').click();
   const modal = page.locator('.games-panel');
   await expect(modal).toBeVisible();
@@ -369,10 +396,11 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
 
   await modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]').click();
   await expect(modal.locator('button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
-  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape'); // closes the modal (and the ⋯ sheet on phones)
   await expect(modal).toHaveCount(0);
 
   // the owned filter appears now that a game is owned
+  await openFilters(page);
   const ownedFilter = page.locator('#obtain-chips button[data-obtain="owned"]');
   await expect(ownedFilter).toBeVisible();
   await closeFilters(page);
@@ -393,7 +421,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   // ownership is server-backed: it survives a reload
   await page.reload();
   await expect(page.locator(gridButton).first()).toBeVisible();
-  await openFilters(page);
+  await openActions(page);
   await page.locator('#games-btn').click();
   await expect(page.locator('.games-panel button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
 });
@@ -401,10 +429,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
 test('planner: verdicts + acquisitions, and owning a game flips a species to Ready', async ({ page }) => {
   // Harness obtainability: Charizard default → Let's Go (lgpe, HOME-native);
   // mega_x → Red/Blue (rb, via Bank); Vivillon is caught; Mewtwo has no data.
-  // Open the phone filter panel first: #games-btn (needed mid-spec) is only
-  // reachable while it's open, and the panel chrome hides in planner view.
-  await openFilters(page);
-  await page.locator('#view-btn').click();
+  await gotoView(page, 'planner');
   const planner = page.locator('#planner');
   await expect(planner).toBeVisible();
   await expect(planner).toContainText('LIVING-DEX PLANNER');
@@ -417,16 +442,23 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   await expect(lgpeStep).toContainText("Let's Go");
   await expect(lgpeStep).toContainText('EMULATE');
 
-  // tapping the stop shows exactly what to catch there (Charizard default)
+  // tapping the stop opens the Hunt screen with exactly what to catch there
   await lgpeStep.click();
-  await expect(planner).toContainText("CATCH IN LET'S GO");
-  await expect(planner.locator('.planner-row[data-entry-key="0006-default-male"]')).toBeVisible();
+  const hunt = page.locator('#hunt');
+  await expect(hunt).toBeVisible();
+  await expect(hunt).toContainText("CATCH IN LET'S GO");
+  await expect(hunt.locator('.planner-row[data-entry-key="0006-default-male"]')).toBeVisible();
+  await hunt.locator('button[data-role="hunt-back"]').click();
+  await expect(planner).toBeVisible();
 
-  // switching to Cartridge-only re-labels the unowned stop as a cartridge buy
-  await planner.locator('.acquire button[data-mode="cartridge-only"]').click();
+  // strategy chips live in the PLAN SETTINGS disclosure; switching to
+  // Cartridge-only re-labels the unowned stop as a cartridge buy
+  await planner.locator('button[data-role="plan-config"]').click();
+  await planner.locator('button[data-mode="cartridge-only"]').click();
   await expect(planner.locator('.acq-step[data-id="lgpe"]')).toContainText('BUY CART');
 
   // My Games: Bank is a service (Active toggle, no cartridge); own Let's Go Pikachu
+  await openActions(page);
   await page.locator('#games-btn').click();
   const modal = page.locator('.games-panel');
   await expect(modal.locator('.game-row[data-game-id="bank"] button[data-method="subscription"]')).toBeVisible();
@@ -440,7 +472,7 @@ test('planner: verdicts + acquisitions, and owning a game flips a species to Rea
   await expect(planner.locator('.plan-tile[data-verdict="ready"]')).toContainText('3');
 
   // back to the dex
-  await page.locator('#view-btn').click();
+  await gotoView(page, 'dex');
   await expect(page.locator(gridButton).first()).toBeVisible();
 });
 
@@ -448,8 +480,9 @@ test('goal scope drives the plan only; the dex has its own VIEW consolidation', 
   // Everything (pinned by beforeEach): Gen I shows all 3 slots.
   await expect(page.locator(gridButton)).toHaveCount(3);
 
-  await page.locator('#view-btn').click();
+  await gotoView(page, 'planner');
   const planner = page.locator('#planner');
+  await planner.locator('button[data-role="plan-config"]').click(); // chips live in the disclosure
   await expect(planner.locator('button[data-scope="all"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(planner.locator('[data-role="goal-progress"]')).toContainText('EVERYTHING');
 
@@ -459,7 +492,7 @@ test('goal scope drives the plan only; the dex has its own VIEW consolidation', 
   await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/5 caught'); // Vivillon, of 5 species
 
   // …but the DEX GRID is untouched: still every slot.
-  await page.locator('#view-btn').click();
+  await gotoView(page, 'dex');
   await expect(page.locator(gridButton)).toHaveCount(3);
   await expect(page.locator('#total')).toHaveText('/ 3');
 
@@ -488,52 +521,56 @@ test('gender preference: Distinct only collapses identical pairs, keeps dimorphi
   await expect(page.locator('#total')).toHaveText('/ 3');
 
   // The preference is shared with the planner goal: 8 slots → 7.
-  await page.locator('#view-btn').click();
+  await gotoView(page, 'planner');
   const planner = page.locator('#planner');
+  await planner.locator('button[data-role="plan-config"]').click(); // chips live in the disclosure
   await expect(planner.locator('button[data-gender="distinct"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/7 caught');
   await planner.locator('button[data-gender="all"]').click();
   await expect(planner.locator('[data-role="goal-progress"]')).toContainText('1/8 caught');
 });
 
-test('companion checklist: how/where lines, also-catchable extras, quick tick-off', async ({ page }) => {
-  await page.locator('#view-btn').click();
+test('hunt: how/where lines, zone progress, quick tick-off, transfer backlog', async ({ page }) => {
+  await gotoView(page, 'planner');
   const planner = page.locator('#planner');
+  const hunt = page.locator('#hunt');
 
-  // Tap the Let's Go stop → checklist: 1 planned (Charizard) + 2 more possible (Turtwig ♂/♀).
+  // Tap the Let's Go stop → the Hunt screen: 1 planned (Charizard) + 2 more
+  // possible (Turtwig ♂/♀).
   await planner.locator('.acq-step[data-id="lgpe"]').click();
-  await expect(planner).toContainText("CATCH IN LET'S GO — 1 PLANNED · 2 MORE POSSIBLE");
-  const charRow = planner.locator('.planner-row[data-entry-key="0006-default-male"]');
+  await expect(hunt).toBeVisible();
+  await expect(hunt).toContainText("CATCH IN LET'S GO — 1 PLANNED · 2 MORE POSSIBLE");
+  await expect(hunt.locator('[data-role="hunt-progress"]')).toHaveText('0/3 DONE HERE');
+  const charRow = hunt.locator('.planner-row[data-entry-key="0006-default-male"]');
   await expect(charRow.locator('.row-how')).toContainText('wild — Route 21, Pallet Town');
 
-  // Default layout is the hunt route: grouped by primary zone, planned and
-  // opportunistic merged, catch-all buckets sunk to the end.
-  await expect(planner.locator('button[data-group="zones"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(planner.locator('.zone-head').first()).toHaveText('ROUTE 21 (1)');
-  await expect(planner.locator('.zone-head').last()).toHaveText('⚡ EVOLVE OR BREED (2)');
+  // Default layout is the hunt route: grouped by primary zone with caught/total
+  // progress, planned and opportunistic merged, catch-all buckets at the end.
+  await expect(hunt.locator('button[data-group="zones"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(hunt.locator('.zone-head').first()).toContainText('ROUTE 21');
+  await expect(hunt.locator('.zone-head').first().locator('[data-role="zone-count"]')).toHaveText('(0/1)');
+  await expect(hunt.locator('.zone-head').last()).toContainText('⚡ EVOLVE OR BREED');
+  await expect(hunt.locator('.zone-head').last().locator('[data-role="zone-count"]')).toHaveText('(0/2)');
   // The Turtwig pair is planned for SV — here it carries the ALSO pill.
-  await expect(planner.locator('.planner-row[data-entry-key="0387-default-male"] .row-also')).toBeVisible();
+  await expect(hunt.locator('.planner-row[data-entry-key="0387-default-male"] .row-also')).toBeVisible();
   await expect(charRow.locator('.row-also')).toHaveCount(0); // planned here, no pill
 
   // BY DEX keeps the classic two-section layout.
-  await planner.locator('button[data-group="dex"]').click();
-  await expect(planner.locator('.zone-head')).toHaveCount(0);
-  await expect(planner.locator('[data-role="also-here"]')).toContainText('ALSO CATCHABLE HERE (2)');
+  await hunt.locator('button[data-group="dex"]').click();
+  await expect(hunt.locator('.zone-head')).toHaveCount(0);
+  await expect(hunt.locator('[data-role="also-here"]')).toContainText('ALSO CATCHABLE HERE (2)');
   // Turtwig has no confirmed catch method here → the evolve hint + trade flag shows.
-  await expect(planner.locator('.planner-row[data-entry-key="0387-default-male"] .row-how')).toContainText('evolve from Tradevo · TRADE EVO');
+  await expect(hunt.locator('.planner-row[data-entry-key="0387-default-male"] .row-how')).toContainText('evolve from Tradevo · TRADE EVO');
   // Back to zones for the rest of the flow (and to leave the default persisted).
-  await planner.locator('button[data-group="zones"]').click();
-  await expect(planner.locator('.zone-head').first()).toBeVisible();
+  await hunt.locator('button[data-group="zones"]').click();
+  await expect(hunt.locator('.zone-head').first()).toBeVisible();
 
-  // Quick tick-off: mark Charizard caught from the row — no sheet needed.
+  // Quick tick-off: mark Charizard caught from the row — no sheet needed. The
+  // row and counters update in place (no scroll-jumping full re-render).
   await charRow.locator('.row-tick').click();
   await expect(charRow.locator('.row-tick')).toHaveText('◉');
-
-  // A session catch is in transit: it lands in the TRANSFER BACKLOG under its game.
-  const backlog = planner.locator('.backlog');
-  await expect(backlog).toContainText('TRANSFER BACKLOG — 1 caught, not yet in HOME');
-  await expect(backlog.locator('.backlog-group')).toContainText('Let’s Go — 1 waiting');
-  await expect(backlog.locator('.backlog-group')).toContainText('→ HOME'); // the route reminder
+  await expect(hunt.locator('[data-role="hunt-progress"]')).toHaveText('1/3 DONE HERE');
+  await expect(hunt.locator('.zone-head').first().locator('[data-role="zone-count"]')).toHaveText('(1/1)');
 
   // The catch recorded the game as its origin, and the sheet shows the transit
   // state with a toggle.
@@ -543,6 +580,13 @@ test('companion checklist: how/where lines, also-catchable extras, quick tick-of
   await expect(page.locator('.sheet-panel .home-toggle')).toContainText('not in HOME');
   await page.keyboard.press('Escape');
 
+  // A session catch is in transit: it lands in the planner's TRANSFER BACKLOG.
+  await hunt.locator('button[data-role="hunt-back"]').click();
+  const backlog = planner.locator('.backlog');
+  await expect(backlog).toContainText('TRANSFER BACKLOG — 1 caught, not yet in HOME');
+  await expect(backlog.locator('.backlog-group')).toContainText('Let’s Go — 1 waiting');
+  await expect(backlog.locator('.backlog-group')).toContainText('→ HOME'); // the route reminder
+
   // Bulk "Mark transferred" clears the backlog.
   await backlog.locator('.backlog-done').click();
   await expect(planner.locator('.backlog')).toHaveCount(0);
@@ -551,6 +595,33 @@ test('companion checklist: how/where lines, also-catchable extras, quick tick-of
   await planner.locator('.planner-row[data-entry-key="0387-default-male"]').click();
   await expect(page.locator('.sheet-panel .evolve-from')).toContainText('Tradevo');
   await expect(page.locator('.sheet-panel .evolve-from')).toContainText('trade evolution');
+});
+
+test('hunt: remaining-only filter and cleared zones collapsing out of the way', async ({ page }) => {
+  await gotoView(page, 'planner');
+  await page.locator('#planner .acq-step[data-id="lgpe"]').click();
+  const hunt = page.locator('#hunt');
+  await expect(hunt.locator('.zone-head').first().locator('[data-role="zone-count"]')).toHaveText('(0/1)');
+
+  // Catch Charizard → ROUTE 21 is cleared (in-place count update first).
+  await hunt.locator('.planner-row[data-entry-key="0006-default-male"] .row-tick').click();
+  await expect(hunt.locator('.zone-head').first().locator('[data-role="zone-count"]')).toHaveText('(1/1)');
+
+  // Remaining only hides the caught row; the re-render also auto-collapses the
+  // cleared zone out of the way.
+  await hunt.locator('button[data-role="hunt-remaining"]').click();
+  await expect(hunt.locator('.planner-row[data-entry-key="0006-default-male"]')).toHaveCount(0);
+  const route21 = hunt.locator('.zone-head', { hasText: 'ROUTE 21' });
+  await expect(route21).toHaveAttribute('aria-expanded', 'false');
+  await expect(route21).toContainText('✓');
+
+  // A cleared zone can still be expanded by tapping its header.
+  await route21.click();
+  await expect(route21).toHaveAttribute('aria-expanded', 'true');
+
+  // Turning Remaining only off brings the caught row back.
+  await hunt.locator('button[data-role="hunt-remaining"]').click();
+  await expect(hunt.locator('.planner-row[data-entry-key="0006-default-male"]')).toBeVisible();
 });
 
 test('detail sheet: Escape and scrim click close it', async ({ page }) => {

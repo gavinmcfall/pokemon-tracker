@@ -112,38 +112,80 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 }
 .game-select:focus-visible { outline: 3px solid light-dark(#E3350D, #F4503B); outline-offset: 2px; }
 
-/* ---- phone header: collapse the filter chrome behind one toggle ----
-   On a phone the wrapped gen/status/type/obtainability rows would fill the
-   whole viewport (and the header is sticky, so the dex never appears). Keep
-   brand + counts + search + Planner visible; everything else expands on tap. */
-.filters-btn { display: none; }
+/* ---- phone chrome: slim header + bottom sheets + bottom nav ----
+   On a phone the filter chips live in a bottom sheet (opened by the Filters
+   button), the header actions live behind ⋯, and view switching is a fixed
+   bottom nav. The header keeps only brand + counts + progress + search. */
+.filters-btn, .more-btn { display: none; }
+.bottom-nav { display: none; }
 @media (max-width: 767px) {
   .topbar { padding: 10px 12px; }
-  .filters-btn { display: inline-flex; }
+  .filters-btn, .more-btn { display: inline-flex; }
+  .more-btn { min-width: 44px; padding: 0; font-size: 18px; }
   /* The desktop layout's spacer would steal half the row from the search box. */
   .filter-row .spacer { display: none; }
   .filter-row .search { flex: 1; width: auto; min-width: 0; }
-  /* With the panel open, gen/status chips share the flex line and would crush
-     the search box to a ~44px circle — give it a full line of its own. */
-  .topbar.filters-open .filter-row .search { flex: 1 1 100%; }
   /* Anything under 16px makes iOS Safari force-zoom the page on focus and
      leave it zoomed — brute-force every text control on small screens. */
   input, select, textarea { font-size: 16px !important; }
-  .topbar:not(.filters-open) .gen-chips,
-  .topbar:not(.filters-open) .status-chips,
-  .topbar:not(.filters-open) .type-row,
-  .topbar:not(.filters-open) .obtain-row,
-  .topbar:not(.filters-open) .io-extra { display: none; }
-  /* Expanded, the filter stack can be taller than the screen. The header is
-     sticky, so it must scroll itself — otherwise swipes scroll the dex behind
-     it and the bottom filters can never be reached. */
-  .topbar.filters-open {
-    max-height: 100vh;
-    max-height: 100dvh;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+  /* Chip rows never render inline in the phone header — the Filters bottom
+     sheet adopts these nodes while it's open. Same for the ⋯ action items. */
+  .topbar .gen-chips, .topbar .status-chips, .topbar .type-row, .topbar .obtain-row,
+  .topbar .io-extra { display: none; }
+  /* View switching moves to the bottom nav; hide the header toggle. */
+  .topbar #view-btn { display: none; }
+
+  .bottom-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: flex; gap: 0;
+    background: light-dark(#FFFFFF, #1B2027);
+    border-top: 1px solid light-dark(#D3D9E0, #2E3742);
+    padding-bottom: env(safe-area-inset-bottom, 0);
   }
+  .bottom-nav button {
+    flex: 1; min-height: 54px; border: none; background: none; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; letter-spacing: 0.08em;
+    color: light-dark(#5A6472, #8B94A4);
+  }
+  .bottom-nav button[aria-current="page"] {
+    color: light-dark(#E3350D, #F4503B);
+    box-shadow: inset 0 3px 0 light-dark(#E3350D, #F4503B);
+  }
+  body { padding-bottom: 78px; } /* clear the fixed nav */
+  .toast { bottom: 92px; } /* toasts must not cover the bottom nav */
 }
+
+/* Bottom sheets (filters / actions) — phone only, built by app.js. */
+.util-scrim {
+  position: fixed; inset: 0; z-index: 45; background: rgba(10, 13, 17, 0.45);
+  display: flex; flex-direction: column; justify-content: flex-end;
+}
+.util-sheet {
+  background: light-dark(#FFFFFF, #1B2027);
+  color: light-dark(#1B1F24, #E7ECF2);
+  border: 1px solid light-dark(#D3D9E0, #2E3742);
+  border-radius: 18px 18px 0 0;
+  max-height: 82vh; max-height: 82dvh;
+  display: flex; flex-direction: column;
+  animation: dex-sheet-up 0.22s ease-out;
+}
+.util-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 14px; }
+.util-sheet-label { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; color: light-dark(#5A6472, #8B94A4); margin-bottom: -6px; }
+/* Chip containers adopted into the sheet become visible again. */
+.util-sheet .gen-chips, .util-sheet .status-chips, .util-sheet .type-row, .util-sheet .obtain-row { display: flex; }
+.util-sheet .io-extra { display: inline-flex; }
+.util-sheet-footer {
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0));
+  border-top: 1px solid light-dark(#D3D9E0, #2E3742);
+}
+.util-sheet-footer button {
+  width: 100%; min-height: 48px; border-radius: 12px; border: none; cursor: pointer;
+  background: light-dark(#E3350D, #F4503B); color: #fff;
+  font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 700; letter-spacing: 0.05em;
+}
+
+/* Hunt view: zone headers pin while their zone scrolls. */
+.zone-head { position: sticky; top: var(--topbar-h, 0px); z-index: 5; background: light-dark(#EEF1F4, #14171C); cursor: pointer; }
 
 /* chips + tiles get focus rings even though their fills are computed inline */
 .gen-chips button:focus-visible,
