@@ -65,10 +65,12 @@ const METHOD_META = {
 const METHOD_ORDER = ['cartridge', 'emulator', 'romhack', 'digital', 'subscription'];
 
 // Planner verdicts → display. Order = how they sort in the planner filter row.
+// One status lexicon everywhere: Caught (in the dex), Catchable now, Need a
+// game. "Own/Owned" is reserved strictly for games.
 const VERDICT_META = {
-  ready: { label: 'Ready', color: 'owned' },
+  ready: { label: 'Catchable now', color: 'owned' },
   'need-game': { label: 'Need a game', color: 'gold' },
-  have: { label: 'Have', color: 'muted' },
+  have: { label: 'Caught', color: 'muted' },
   unknown: { label: 'Unknown', color: 'muted' },
   'event-only': { label: 'Event-only', color: 'red' },
 };
@@ -86,11 +88,13 @@ const ACQUIRE_RANKS = [
   { key: 'fewest-consoles', label: 'Fewest consoles' },
   { key: 'oldest-gen', label: 'Oldest gen first' },
 ];
+// Plain-language acquisition notes — rendered as flat text, NOT button-like
+// pills (a bordered "SUBSCRIBE" reads as a call-to-action it isn't).
 const VIA_META = {
-  cartridge: { label: 'BUY CART', color: 'gold' },
-  emulator: { label: 'EMULATE', color: 'owned' },
-  install: { label: 'INSTALL', color: 'owned' },
-  subscription: { label: 'SUBSCRIBE', color: 'gold' },
+  cartridge: { label: 'buy cartridge', color: 'gold' },
+  emulator: { label: 'via emulator', color: 'owned' },
+  install: { label: 'install', color: 'owned' },
+  subscription: { label: 'needs subscription', color: 'gold' },
 };
 const ACQ_MODE_KEY = 'livingdex-acq-mode';
 const ACQ_RANK_KEY = 'livingdex-acq-rank';
@@ -883,6 +887,10 @@ function render() {
   el.hunt.hidden = view !== 'hunt';
   if (el.filterRow) el.filterRow.hidden = !inDex;
   if (el.typeRow) el.typeRow.hidden = !inDex;
+  // The header count is DEX-scoped; in planner/hunt it would sit right above a
+  // different goal-scoped number and read as a contradiction — hide it there.
+  if (el.counts) el.counts.hidden = !inDex;
+  el.progress.hidden = !inDex;
   syncBottomNav();
   // Sticky zone headers pin just below the topbar.
   document.documentElement.style.setProperty('--topbar-h', `${el.topbar ? el.topbar.offsetHeight : 0}px`);
@@ -1012,7 +1020,7 @@ function plannerRow(e, stopGameId, opportunistic) {
   const detailText = stopGameId ? howWhereText(e, stopGameId)
     : verdict === 'ready' && p ? `catch in ${gameLabel(p.via) ?? p.via}`
     : verdict === 'need-game' && p ? `acquire ${formatNeeds(p.needs)}`
-    : verdict === 'have' ? 'in your dex'
+    : verdict === 'have' ? 'already caught'
     : verdict === 'event-only' ? 'event-only distribution'
     : 'no known route yet';
   const detail = elem('span', { fontSize: '11.5px', color: T.muted, lineHeight: '1.3', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, detailText);
@@ -1158,12 +1166,10 @@ function acquireSection() {
         fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', fontWeight: '700', letterSpacing: '0.05em', color: T.text,
       }, 'OWN'));
     } else {
-      const via = VIA_META[step.via] ?? { label: String(step.via).toUpperCase(), color: 'gold' };
-      const viaColor = T[via.color] ?? T.gold;
+      const via = VIA_META[step.via] ?? { label: String(step.via), color: 'gold' };
       rowEl.append(elem('span', {
-        flexShrink: 0, display: 'inline-flex', alignItems: 'center', minHeight: '24px', padding: '0 10px', borderRadius: '999px',
-        background: `color-mix(in oklab, ${viaColor} 16%, ${T.raised})`, border: `1px solid ${viaColor}`,
-        fontFamily: "'IBM Plex Mono', monospace", fontSize: '10px', fontWeight: '700', letterSpacing: '0.05em', color: T.text,
+        flexShrink: 0, fontFamily: "'IBM Plex Mono', monospace", fontSize: '10.5px', fontWeight: '700',
+        letterSpacing: '0.05em', color: T[via.color] ?? T.gold,
       }, via.label));
     }
 
@@ -1256,7 +1262,19 @@ function backlogSection() {
     }, 'Mark transferred');
     done.type = 'button'; done.className = 'backlog-done';
     done.title = `All ${members.length} from ${origin} are now in HOME`;
-    done.addEventListener('click', () => bulkMarkTransferred(members.map((e) => e.entryKey)));
+    // Two-tap confirm: this flips every member's in-HOME flag at once, and a
+    // stray tap on a phone shouldn't silently commit dozens of entries.
+    let armed = false; let disarm;
+    done.addEventListener('click', () => {
+      if (!armed) {
+        armed = true;
+        done.textContent = `Tap again — move ${members.length} to HOME`;
+        disarm = setTimeout(() => { armed = false; done.textContent = 'Mark transferred'; }, 4000);
+        return;
+      }
+      clearTimeout(disarm);
+      bulkMarkTransferred(members.map((e) => e.entryKey));
+    });
     row.append(done);
     wrap.append(row);
   }
@@ -1332,16 +1350,22 @@ function renderPlanner() {
   const backlog = backlogSection();
   if (backlog) root.append(backlog);
 
+  // On wide screens the verdict tiles + species list move into a second
+  // column (CSS grid via .two-col) instead of stacking below the fold.
+  root.classList.add('two-col');
+  const rightCol = elem('div', { display: 'flex', flexDirection: 'column', gap: '16px', minWidth: '0' });
+  rightCol.className = 'col-right';
+
   // Breakdown by verdict (secondary). Summary tiles (click to filter).
   const tiles = elem('div', { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(108px, 1fr))', gap: '8px' });
   tiles.append(
-    plannerTile('Ready', s.ready, T.owned, 'ready'),
+    plannerTile('Catchable now', s.ready, T.owned, 'ready'),
     plannerTile('Need a game', s.needGame, T.gold, 'need-game'),
-    plannerTile('Have', s.have, T.muted, 'have'),
+    plannerTile('Caught', s.have, T.muted, 'have'),
     plannerTile('Unknown', s.unknown, T.muted, 'unknown'),
     plannerTile('Event-only', s.eventOnly, T.red, 'event-only'),
   );
-  root.append(tiles);
+  rightCol.append(tiles);
 
   // Species list under the active verdict-tile filter. (The per-game catch
   // checklist is its own screen now — the Hunt view.)
@@ -1374,7 +1398,8 @@ function renderPlanner() {
   if (filtered.length === 0) {
     listWrap.append(elem('div', { padding: '24px', textAlign: 'center', fontSize: '13px', color: T.muted }, 'Nothing in this category.'));
   }
-  root.append(listWrap);
+  rightCol.append(listWrap);
+  root.append(rightCol);
 }
 
 /* ---------- hunt view: the per-game catch checklist as its own screen ---------- */
@@ -1706,27 +1731,43 @@ function openSheet(entryKey) {
   sheet.lastFocus = document.activeElement;
 
   const narrow = window.innerWidth < 640;
-  sheet.scrim = elem('div', { alignItems: narrow ? 'flex-end' : 'center', padding: narrow ? '0' : '24px' });
+  // Wide screens dock the sheet as a right-hand panel WITHOUT a blocking
+  // scrim, so the grid stays interactive for bulk review — clicking another
+  // tile retargets the panel instead of forcing close-find-reopen.
+  const docked = !narrow && window.innerWidth >= 1024;
+  sheet.scrim = elem('div', docked
+    ? { alignItems: 'stretch', justifyContent: 'flex-end', padding: '12px', background: 'transparent', pointerEvents: 'none' }
+    : { alignItems: narrow ? 'flex-end' : 'center', padding: narrow ? '0' : '24px' });
   sheet.scrim.className = 'sheet-scrim';
   sheet.panel = elem('div', {
     width: narrow ? '100%' : 'min(560px, 92vw)',
-    maxHeight: narrow ? '88vh' : '86vh',
+    maxHeight: narrow ? '88vh' : docked ? 'calc(100vh - 24px)' : '86vh',
     borderRadius: narrow ? '18px 18px 0 0' : '18px',
     fontFamily: "'Atkinson Hyperlegible', system-ui, sans-serif",
+    ...(docked ? { pointerEvents: 'auto' } : {}),
   });
   sheet.panel.className = 'sheet-panel';
   sheet.panel.setAttribute('role', 'dialog');
-  sheet.panel.setAttribute('aria-modal', 'true');
+  if (!docked) sheet.panel.setAttribute('aria-modal', 'true');
   sheet.panel.setAttribute('aria-label', `${e.name}${e.formLabel ? ' — ' + e.formLabel : ''} details`);
 
   renderSheetInto(e, false);
   sheet.scrim.append(sheet.panel);
   document.body.append(sheet.scrim);
-  document.body.style.overflow = 'hidden';
+  if (!docked) document.body.style.overflow = 'hidden';
 
   sheet.scrim.addEventListener('click', (ev) => { if (ev.target === sheet.scrim) closeSheet(); });
-  sheet.panel.addEventListener('keydown', trapTab);
-  sheet.onKey = (ev) => { if (ev.key === 'Escape') closeSheet(); };
+  if (!docked) sheet.panel.addEventListener('keydown', trapTab);
+  sheet.onKey = (ev) => {
+    if (ev.key === 'Escape') { closeSheet(); return; }
+    // Step through neighbouring entries without closing — bulk review.
+    const ae = document.activeElement;
+    const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+    if (!typing && (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight')) {
+      ev.preventDefault();
+      stepSheet(ev.key === 'ArrowLeft' ? -1 : 1);
+    }
+  };
   document.addEventListener('keydown', sheet.onKey);
   setTimeout(() => { const f = sheet.panel.querySelector('button, input, textarea, select'); if (f) f.focus(); }, 30);
 }
@@ -1739,6 +1780,24 @@ function closeSheet() {
   const restore = sheet.lastFocus;
   sheet.key = sheet.scrim = sheet.panel = sheet.lastFocus = sheet.onKey = null;
   if (restore && restore.focus) setTimeout(() => restore.focus(), 20);
+}
+
+/** The entry sequence ‹/› steps through — whatever list the sheet was opened from. */
+function sheetNavList() {
+  if (state.view === 'hunt' && state.acqStepKeys) return huntItems().map((i) => i.e);
+  if (state.view === 'planner') return state.entries.filter((x) => !state.planSummary || state.plan[x.entryKey] !== undefined);
+  return visibleEntries();
+}
+
+function stepSheet(delta) {
+  if (!sheet.key) return;
+  const list = sheetNavList();
+  const i = list.findIndex((x) => x.entryKey === sheet.key);
+  const next = i === -1 ? null : list[i + delta];
+  if (!next) return;
+  sheet.key = next.entryKey;
+  sheet.panel.setAttribute('aria-label', `${next.name}${next.formLabel ? ' — ' + next.formLabel : ''} details`);
+  renderSheetInto(next, false);
 }
 
 function trapTab(ev) {
@@ -1785,10 +1844,19 @@ function renderSheetInto(e, refocusCaught) {
   }
   title.append(pills);
 
+  const nav = elem('span', { display: 'flex', gap: '6px', flexShrink: 0 });
+  for (const [delta, glyph, label] of [[-1, '‹', 'Previous entry'], [1, '›', 'Next entry']]) {
+    const b = elem('button', null, glyph); b.type = 'button'; b.className = 'sheet-close';
+    b.dataset.role = delta < 0 ? 'sheet-prev' : 'sheet-next';
+    b.setAttribute('aria-label', label); b.title = `${label} (arrow key)`;
+    b.addEventListener('click', () => stepSheet(delta));
+    nav.append(b);
+  }
   const close = elem('button', null, '✕'); close.type = 'button'; close.className = 'sheet-close';
   close.setAttribute('aria-label', 'Close details');
   close.addEventListener('click', closeSheet);
-  head.append(spriteWrap, title, close);
+  nav.append(close);
+  head.append(spriteWrap, title, nav);
 
   // my catch
   const my = elem('div', null); my.className = 'sheet-section';
@@ -1932,7 +2000,7 @@ function renderSheetInto(e, refocusCaught) {
         display: 'inline-flex', alignItems: 'center', minHeight: '26px', padding: '0 11px', borderRadius: '999px',
         background: `color-mix(in oklab, ${accent} 18%, ${T.raised})`, border: `1px solid ${accent}`,
         fontFamily: "'IBM Plex Mono', monospace", fontSize: '11.5px', fontWeight: '700', letterSpacing: '0.05em', color: T.text,
-      }, ready ? '✓ READY' : 'NEED A GAME'));
+      }, ready ? '✓ CATCHABLE' : 'NEED A GAME'));
       const detail = ready
         ? `catch in ${gameLabel(plan.via) ?? plan.via} — ${plan.route}`
         : `acquire ${formatNeeds(plan.needs)}`;
@@ -2310,7 +2378,7 @@ async function mirrorSprites() {
 /* ---------- init ---------- */
 function init() {
   Object.assign(el, {
-    region: $('region'), caught: $('caught'), total: $('total'), pct: $('pct'), progress: $('progress'),
+    region: $('region'), caught: $('caught'), total: $('total'), pct: $('pct'), progress: $('progress'), counts: $('counts'),
     genChips: $('gen-chips'), statusChips: $('status-chips'), typeChips: $('type-chips'), search: $('search'),
     obtainRow: $('obtain-row'), obtainChips: $('obtain-chips'), gameSelect: $('game-select'), themeBtn: $('theme-btn'),
     viewRow: $('view-row'), viewChips: $('view-chips'), genderChips: $('gender-chips'),
@@ -2369,6 +2437,48 @@ function init() {
   window.addEventListener('resize', () => {
     document.documentElement.style.setProperty('--topbar-h', `${el.topbar ? el.topbar.offsetHeight : 0}px`);
   });
+
+  // Keyboard layer (desktop power use): "/" focuses search, Escape clears it,
+  // arrows walk the grid, i opens the focused tile's details.
+  document.addEventListener('keydown', (ev) => {
+    const ae = document.activeElement;
+    const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable);
+    if (ev.key === '/' && !typing && state.view === 'dex' && !sheet.key) {
+      ev.preventDefault(); el.search.focus(); el.search.select(); return;
+    }
+    if (ev.key === 'Escape' && ae === el.search) {
+      if (el.search.value) { el.search.value = ''; state.query = ''; render(); }
+      el.search.blur(); return;
+    }
+    if (state.view !== 'dex' || typing || sheet.key || !ae || !ae.classList || !ae.classList.contains('tile-body')) return;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key)) {
+      ev.preventDefault();
+      const tiles = [...el.grid.querySelectorAll('.tile-body')];
+      const i = tiles.indexOf(ae);
+      if (i === -1 || !tiles.length) return;
+      const cols = Math.max(1, Math.round(el.grid.clientWidth / (tiles[0].parentElement.offsetWidth + 10)));
+      const j = i + (ev.key === 'ArrowLeft' ? -1 : ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowUp' ? -cols : cols);
+      if (j >= 0 && j < tiles.length) tiles[j].focus();
+      return;
+    }
+    if (ev.key.toLowerCase() === 'i') { ev.preventDefault(); openSheet(ae.dataset.entryKey); }
+  });
+  if (window.matchMedia('(min-width: 768px)').matches) el.search.placeholder = 'Search name or #   ( / )';
+
+  // Desktop: the full filter chrome costs ~230px of every viewport. Once the
+  // user is scanning (scrolled into the grid), condense the sticky header to
+  // brand + progress + search; it re-expands near the top. Hysteresis stops
+  // it flapping at the boundary.
+  let condensed = false;
+  window.addEventListener('scroll', () => {
+    if (window.innerWidth < 768) return;
+    const want = condensed ? window.scrollY > 120 : window.scrollY > 260;
+    if (want !== condensed) {
+      condensed = want;
+      el.topbar.classList.toggle('condensed', condensed);
+      document.documentElement.style.setProperty('--topbar-h', `${el.topbar.offsetHeight}px`);
+    }
+  }, { passive: true });
   el.emptyAction.addEventListener('click', () => {
     state.status = 'all'; state.query = ''; state.types = []; state.obtain = { owned: false, switch: false, shiny: false, gmax: false, tera: false };
     state.gameFilter = ''; el.search.value = '';
