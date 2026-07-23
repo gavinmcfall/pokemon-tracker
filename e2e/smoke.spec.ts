@@ -5,12 +5,19 @@ import { expect, test } from '@playwright/test';
 // (Charizard default+mega_x, Mewtwo) and one caught Gen VI Vivillon.
 const gridButton = '.grid .tile-body';
 
-// On the phone lane the filter chrome starts collapsed behind the Filters
-// toggle; expand it so the shared specs can reach the gen/type/games controls.
-// The dedicated phone-header spec covers the collapsed default itself.
-async function expandFilters(page: import('@playwright/test').Page): Promise<void> {
-  const toggle = page.locator('#filters-btn');
-  if (await toggle.isVisible()) await toggle.click();
+// On the phone lane most filter chrome lives behind the Filters toggle, and
+// while the panel is OPEN it covers the grid (it's a full-height sticky
+// header) — so specs open it around header-control interactions and close it
+// again before touching tiles, mirroring how a phone user actually works.
+// Both helpers no-op on desktop, where everything is always visible.
+type Pg = import('@playwright/test').Page;
+async function openFilters(page: Pg): Promise<void> {
+  const t = page.locator('#filters-btn');
+  if (await t.isVisible() && (await t.getAttribute('aria-expanded')) !== 'true') await t.click();
+}
+async function closeFilters(page: Pg): Promise<void> {
+  const t = page.locator('#filters-btn');
+  if (await t.isVisible() && (await t.getAttribute('aria-expanded')) === 'true') await t.click();
 }
 
 test.beforeEach(async ({ page, request }) => {
@@ -20,7 +27,6 @@ test.beforeEach(async ({ page, request }) => {
   await page.addInitScript(() => localStorage.setItem('livingdex-goal-scope', 'all'));
   await page.goto('/');
   await expect(page.locator(gridButton).first()).toBeVisible();
-  await expandFilters(page);
 });
 
 test('loads the generation-scoped grid with header progress', async ({ page }) => {
@@ -34,7 +40,9 @@ test('loads the generation-scoped grid with header progress', async ({ page }) =
 });
 
 test('switching generation rescopes the view and shows the caught Vivillon', async ({ page }) => {
+  await openFilters(page);
   await page.locator('.gen-chips button[data-gen="6"]').click();
+  await closeFilters(page);
   await expect(page.locator('#region')).toHaveText('Kalos');
   await expect(page.locator(gridButton)).toHaveCount(1);
   const vivillon = page.locator(`${gridButton}[data-entry-key="0666-fancy-female"]`);
@@ -44,7 +52,9 @@ test('switching generation rescopes the view and shows the caught Vivillon', asy
 });
 
 test('ALL generations chip shows the whole national dex and searches across gens', async ({ page }) => {
+  await openFilters(page);
   await page.locator('.gen-chips button[data-gen="0"]').click();
+  await closeFilters(page);
   await expect(page.locator('#region')).toHaveText('National');
   // every seeded slot at once: 3 Gen I + 4 Gen IV + 1 Gen VI
   await expect(page.locator(gridButton)).toHaveCount(8);
@@ -65,8 +75,7 @@ test('ALL generations chip shows the whole national dex and searches across gens
 
 test('phone header: filter chrome collapses behind the Filters toggle', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'serina', 'phone-width behaviour only');
-  // beforeEach expanded the filters — reload to see the collapsed default.
-  await page.reload();
+  // Collapsed is the default state on load.
   await expect(page.locator(gridButton).first()).toBeVisible();
   await expect(page.locator('#gen-chips')).toBeHidden();
   await expect(page.locator('#type-chips')).toBeHidden();
@@ -79,6 +88,16 @@ test('phone header: filter chrome collapses behind the Filters toggle', async ({
   await toggle.click();
   await expect(page.locator('#gen-chips')).toBeVisible();
   await expect(page.locator('#games-btn')).toBeVisible();
+
+  // expanded, the header scrolls its own overflow (capped to the viewport)
+  // instead of letting swipes scroll the dex behind it
+  const headerScroll = await page.evaluate(() => {
+    const bar = document.querySelector('.topbar');
+    if (!bar) return null;
+    const cs = getComputedStyle(bar);
+    return { overflowY: cs.overflowY, capped: bar.getBoundingClientRect().height <= window.innerHeight + 1 };
+  });
+  expect(headerScroll).toEqual({ overflowY: 'auto', capped: true });
 
   // active filters are surfaced on the collapsed toggle
   await page.locator('.type-row button[data-type="fire"]').click();
@@ -109,24 +128,80 @@ test('a catch persists across reload (server-backed, not localStorage)', async (
 
 test('status and type filters narrow the grid; empty state offers a reset', async ({ page }) => {
   // status: Needed hides nothing yet (all 3 uncaught)
+  await openFilters(page);
   await page.locator('.status-chips button[data-status="needed"]').click();
   await expect(page.locator(gridButton)).toHaveCount(3);
 
   // catch one, then Caught shows exactly it
   await page.locator('.status-chips button[data-status="all"]').click();
+  await closeFilters(page);
   await page.locator(`${gridButton}[data-entry-key="0150-default-genderless"]`).click();
+  await openFilters(page);
   await page.locator('.status-chips button[data-status="caught"]').click();
   await expect(page.locator(gridButton)).toHaveCount(1);
   await expect(page.locator(gridButton).first()).toHaveAttribute('data-entry-key', '0150-default-genderless');
 
   // a search with no matches shows the empty state; its action clears filters
+  // INCLUDING the pinned generation (gen resets to ALL: 3 + 4 + 1 = 8 slots)
   await page.locator('.status-chips button[data-status="all"]').click();
+  await closeFilters(page);
   await page.locator('#search').fill('zzzzz');
   await expect(page.locator('#empty')).toBeVisible();
   await expect(page.locator('#results')).toBeHidden();
   await page.locator('#empty-action').click();
   await expect(page.locator('#search')).toHaveValue('');
+  await expect(page.locator('#region')).toHaveText('National');
+  await expect(page.locator(gridButton)).toHaveCount(8);
+});
+
+test('a typed query searches the whole national dex, not just the pinned gen', async ({ page }) => {
+  // Default view is Gen I — Vivillon is Gen VI, but search must still find it.
+  await expect(page.locator('#region')).toHaveText('Kanto');
+  await page.locator('#search').fill('vivillon');
+  await expect(page.locator(gridButton)).toHaveCount(1);
+  await expect(page.locator(gridButton).first()).toHaveAttribute('data-entry-key', '0666-fancy-female');
+  await expect(page.locator('#result-label')).toContainText('SEARCHING ALL GENS');
+  // clearing the query restores the gen scope
+  await page.locator('#search').fill('');
   await expect(page.locator(gridButton)).toHaveCount(3);
+  await expect(page.locator('#result-label')).not.toContainText('SEARCHING ALL GENS');
+});
+
+test('tile toggle shows an Undo toast, and Needed keeps the tile in place', async ({ page }) => {
+  const charizard = page.locator(`${gridButton}[data-entry-key="0006-default-male"]`);
+
+  // Under "Needed", catching must NOT reflow the grid under your finger.
+  await openFilters(page);
+  await page.locator('.status-chips button[data-status="needed"]').click();
+  await closeFilters(page);
+  await expect(page.locator(gridButton)).toHaveCount(3);
+  await charizard.click();
+  await expect(charizard).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator(gridButton)).toHaveCount(3); // still in place, restyled
+
+  // Undo restores the previous state from the toast.
+  const undo = page.locator('.toast .toast-action');
+  await expect(undo).toBeVisible();
+  await expect(page.locator('.toast')).toContainText('Charizard ♂ — marked caught');
+  await undo.click();
+  await expect(charizard).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#caught')).toHaveText('0');
+
+  // The next explicit render reconciles membership: catch again, switch filter.
+  await charizard.click();
+  await openFilters(page);
+  await page.locator('.status-chips button[data-status="all"]').click();
+  await page.locator('.status-chips button[data-status="needed"]').click();
+  await closeFilters(page);
+  await expect(page.locator(gridButton)).toHaveCount(2); // now it's gone from Needed
+});
+
+test('the active view survives a reload (planner stays planner)', async ({ page }) => {
+  await page.locator('#view-btn').click();
+  await expect(page.locator('#planner')).toBeVisible();
+  await page.reload();
+  await expect(page.locator('#planner')).toBeVisible();
+  await expect(page.locator('#view-btn')).toHaveText('← Dex');
 });
 
 test('search matches by dex number', async ({ page }) => {
@@ -150,6 +225,7 @@ test('keyboard-only: a tile is reachable and toggleable without a pointer', asyn
 });
 
 test('theme toggle cycles auto → light → dark', async ({ page }) => {
+  await openFilters(page); // theme button lives behind the phone Filters toggle
   const btn = page.locator('#theme-btn');
   await expect(btn).toHaveText('◐ Auto');
   await btn.click();
@@ -168,6 +244,7 @@ test('no horizontal overflow on a phone viewport', async ({ page }) => {
 
 test('mirror-sprites control mirrors and rewrites tile sprite URLs to local', async ({ page }) => {
   // The harness enables the sprite mirror (fake fetch), so the button shows.
+  await openFilters(page); // mirror button lives behind the phone Filters toggle
   const mirror = page.locator('#mirror-btn');
   await expect(mirror).toBeVisible();
   await mirror.click();
@@ -208,7 +285,9 @@ test('detail sheet: opens via ⋯, edits metadata, persists across reload', asyn
 });
 
 test('specimen: caught Vivillon shows shiny/event/6IV badges and a Best Specimen zone', async ({ page }) => {
+  await openFilters(page);
   await page.locator('.gen-chips button[data-gen="6"]').click();
+  await closeFilters(page);
   const vivillon = `${gridButton}[data-entry-key="0666-fancy-female"]`;
   await expect(page.locator(vivillon)).toBeVisible();
   // at-a-glance badges on the tile
@@ -240,8 +319,10 @@ test('specimen: an uncaught entry has no badges and no Best Specimen zone', asyn
 
 test('obtainability: filters appear and the detail sheet shows availability', async ({ page }) => {
   // enrichment is present, so the obtain filter row shows
+  await openFilters(page);
   await expect(page.locator('#obtain-row')).toBeVisible();
   await expect(page.locator('#obtain-chips button[data-obtain="gmax"]')).toBeVisible();
+  await closeFilters(page);
 
   // the Charizard detail sheet shows the Obtainability zone with its game + GMAX badge
   const cz = `${gridButton}[data-entry-key="0006-default-male"]`;
@@ -262,7 +343,9 @@ test('obtainability filter hides known non-matches but keeps entries with unknow
   // filter must hide the known-false one but keep the unknown one — we never
   // hide on a guess.
   await expect(page.locator(gridButton)).toHaveCount(3);
+  await openFilters(page);
   await page.locator('#obtain-chips button[data-obtain="switch"]').click();
+  await closeFilters(page);
   await expect(page.locator(gridButton)).toHaveCount(2);
   await expect(page.locator(`${gridButton}[data-entry-key="0006-default-male"]`)).toBeVisible();   // known true → kept
   await expect(page.locator(`${gridButton}[data-entry-key="0006-mega_x-male"]`)).toHaveCount(0);   // known false → hidden
@@ -275,6 +358,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   // Pikachu release (versionGroup lgpe) should flag Charizard's chip, reveal the
   // "In a game I own" filter, and (with the filter on) keep Charizard + the
   // unknown Mewtwo while hiding the known-non-match mega_x.
+  await openFilters(page); // My Games lives behind the phone Filters toggle
   await page.locator('#games-btn').click();
   const modal = page.locator('.games-panel');
   await expect(modal).toBeVisible();
@@ -291,6 +375,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   // the owned filter appears now that a game is owned
   const ownedFilter = page.locator('#obtain-chips button[data-obtain="owned"]');
   await expect(ownedFilter).toBeVisible();
+  await closeFilters(page);
 
   // Charizard's detail sheet marks the Let's Go chip as owned
   await page.locator(`${gridButton}[data-entry-key="0006-default-male"] ~ .tile-info`).click();
@@ -298,7 +383,9 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   await page.keyboard.press('Escape');
 
   // the owned filter keeps known-match + unknown, hides the known non-match
+  await openFilters(page);
   await ownedFilter.click();
+  await closeFilters(page);
   await expect(page.locator(`${gridButton}[data-entry-key="0006-default-male"]`)).toBeVisible();       // owned lets-go → kept
   await expect(page.locator(`${gridButton}[data-entry-key="0006-mega_x-male"]`)).toHaveCount(0);        // only rb → hidden
   await expect(page.locator(`${gridButton}[data-entry-key="0150-default-genderless"]`)).toBeVisible();  // unknown → kept
@@ -306,7 +393,7 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   // ownership is server-backed: it survives a reload
   await page.reload();
   await expect(page.locator(gridButton).first()).toBeVisible();
-  await expandFilters(page);
+  await openFilters(page);
   await page.locator('#games-btn').click();
   await expect(page.locator('.games-panel button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
 });
@@ -314,6 +401,9 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
 test('planner: verdicts + acquisitions, and owning a game flips a species to Ready', async ({ page }) => {
   // Harness obtainability: Charizard default → Let's Go (lgpe, HOME-native);
   // mega_x → Red/Blue (rb, via Bank); Vivillon is caught; Mewtwo has no data.
+  // Open the phone filter panel first: #games-btn (needed mid-spec) is only
+  // reachable while it's open, and the panel chrome hides in planner view.
+  await openFilters(page);
   await page.locator('#view-btn').click();
   const planner = page.locator('#planner');
   await expect(planner).toBeVisible();
@@ -385,7 +475,9 @@ test('goal scope drives the plan only; the dex has its own VIEW consolidation', 
 
 test('gender preference: Distinct only collapses identical pairs, keeps dimorphic ones', async ({ page }) => {
   // Gen IV fixture: Turtwig ♂/♀ (identical) + Hippopotas ♂/♀ (visually distinct).
+  await openFilters(page);
   await page.locator('.gen-chips button[data-gen="4"]').click();
+  await closeFilters(page);
   await expect(page.locator(gridButton)).toHaveCount(4);
 
   await page.locator('#gender-chips button[data-gender="distinct"]').click();

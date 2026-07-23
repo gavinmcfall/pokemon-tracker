@@ -10,6 +10,10 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   testMatch: '**/*.spec.ts',
+  // Reload-heavy specs legitimately run ~28s on loaded CI/dev containers (the
+  // harness's unresolvable sprite hosts delay the load event); 30s default
+  // made them coin-flips.
+  timeout: 60_000,
   fullyParallel: false,
   // Both projects share one harness server (mutable MemoryStore state), so
   // lanes must not interleave. Each test restores the state it changes.

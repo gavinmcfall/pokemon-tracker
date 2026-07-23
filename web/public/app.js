@@ -95,6 +95,7 @@ const VIA_META = {
 const ACQ_MODE_KEY = 'livingdex-acq-mode';
 const ACQ_RANK_KEY = 'livingdex-acq-rank';
 const ACQ_GROUP_KEY = 'livingdex-acq-group'; // checklist layout: 'zones' | 'dex'
+const APP_VIEW_KEY = 'livingdex-app-view'; // 'dex' | 'planner' — survive mid-session reloads
 
 // Goal scopes — what "finishing the dex" means (mirrors src/planner/scope.ts).
 // A species/regional-form group counts as caught when ANY of its slots is.
@@ -284,12 +285,18 @@ async function api(path, options) {
 }
 
 let toastTimer;
-function toast(message, isError) {
-  el.toast.textContent = message;
+function toast(message, isError, action) {
+  el.toast.replaceChildren(document.createTextNode(message));
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'toast-action'; b.textContent = action.label;
+    b.addEventListener('click', () => { clearTimeout(toastTimer); el.toast.hidden = true; action.onClick(); });
+    el.toast.append(b);
+  }
   el.toast.classList.toggle('error', Boolean(isError));
   el.toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.toast.hidden = true; }, 6000);
+  toastTimer = setTimeout(() => { el.toast.hidden = true; }, action ? 8000 : 6000);
 }
 
 /* ---------- theme ---------- */
@@ -457,7 +464,13 @@ function matchesFilters(e) {
   }
   return true;
 }
-function visibleEntries() { return genEntries().filter(matchesFilters); }
+function visibleEntries() {
+  // A typed query escapes the gen filter — "do I have a Klawf yet?" must not
+  // dead-end just because the header happens to be pinned to Kanto.
+  const q = state.query.trim();
+  const pool = q ? state.entries.filter(inScope) : genEntries();
+  return pool.filter(matchesFilters);
+}
 function obtainActiveCount() {
   return Object.values(state.obtain).filter(Boolean).length + (state.gameFilter ? 1 : 0);
 }
@@ -639,9 +652,10 @@ function tileHint(e) {
   return { hint: '', title: '' };
 }
 
-const lp = { timer: null, fired: false };
-function startLongPress(entryKey) {
+const lp = { timer: null, fired: false, x: 0, y: 0 };
+function startLongPress(entryKey, ev) {
   lp.fired = false;
+  lp.x = ev.clientX; lp.y = ev.clientY;
   clearTimeout(lp.timer);
   lp.timer = setTimeout(() => { lp.fired = true; openSheet(entryKey); }, 500);
 }
@@ -657,7 +671,7 @@ function tileMarkup(e) {
   btn.title = `${e.name}${e.formLabel ? ' — ' + e.formLabel : ''} · ${e.types.join(' / ')} · ${c ? 'caught — tap to unmark' : 'needed — tap to mark caught'} · long-press or ⋯ for details`;
 
   // Top row stays sparse — number + type dots only — so nothing crowds the ⋯.
-  const head = elem('span', { display: 'flex', width: '100%', alignItems: 'center', gap: '4px', paddingRight: '30px', minHeight: '16px' });
+  const head = elem('span', { display: 'flex', width: '100%', alignItems: 'center', gap: '4px', paddingRight: '38px', minHeight: '16px' });
   const num = elem('span', { display: 'inline-flex', alignItems: 'center', gap: '5px', fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', fontWeight: '600', letterSpacing: '0.05em', color: 'var(--num)' });
   num.textContent = '#' + String(e.dex).padStart(4, '0');
   for (const dv of ['--dot1', '--dot2']) num.append(elem('span', { width: '7px', height: '7px', borderRadius: '50%', background: `var(${dv})`, flexShrink: 0 }));
@@ -693,9 +707,13 @@ function tileMarkup(e) {
 
   btn.append(head, img, name, form, badges);
   btn.addEventListener('click', () => { if (lp.fired) { lp.fired = false; return; } toggle(e.entryKey); });
-  btn.addEventListener('pointerdown', () => startLongPress(e.entryKey));
+  btn.addEventListener('pointerdown', (ev) => startLongPress(e.entryKey, ev));
   btn.addEventListener('pointerup', cancelLongPress);
   btn.addEventListener('pointerleave', cancelLongPress);
+  // A scroll flick must never open the sheet: the browser fires pointercancel
+  // when it claims the gesture, and drifting fingers get a movement threshold.
+  btn.addEventListener('pointercancel', cancelLongPress);
+  btn.addEventListener('pointermove', (ev) => { if (Math.hypot(ev.clientX - lp.x, ev.clientY - lp.y) > 12) cancelLongPress(); });
   btn.addEventListener('contextmenu', (ev) => ev.preventDefault());
 
   const info = elem('button', null); info.type = 'button'; info.className = 'tile-info';
@@ -748,7 +766,8 @@ function renderGrid() {
   }
   if (!state.loading && visible.length > 0) {
     const fc = (state.status !== 'all' ? 1 : 0) + state.types.length + (state.query.trim() ? 1 : 0) + obtainActiveCount();
-    el.resultLabel.textContent = `${visible.length} ${visible.length === 1 ? 'ENTRY' : 'ENTRIES'}` + (fc ? ` · ${fc} FILTER${fc > 1 ? 'S' : ''} ACTIVE` : '');
+    el.resultLabel.textContent = `${visible.length} ${visible.length === 1 ? 'ENTRY' : 'ENTRIES'}` + (fc ? ` · ${fc} FILTER${fc > 1 ? 'S' : ''} ACTIVE` : '')
+      + (state.query.trim() && state.gen !== 0 ? ' · SEARCHING ALL GENS' : '');
     const frag = document.createDocumentFragment();
     for (const e of visible) frag.append(tileMarkup(e));
     el.grid.replaceChildren(frag);
@@ -823,27 +842,36 @@ function plannerRow(e, stopGameId, opportunistic) {
   const verdict = p?.verdict ?? 'unknown';
   const meta = VERDICT_META[verdict] ?? VERDICT_META.unknown;
   const color = T[meta.color] ?? T.muted;
+  // Wrapper div holds the row button and (in checklist mode) the quick-tick as
+  // a SIBLING button — buttons must not nest, and the tick needs its own
+  // keyboard focus + a full 44px hit area.
+  const wrap = elem('div', { position: 'relative', display: 'flex', width: '100%' });
+  wrap.className = 'planner-row'; wrap.dataset.entryKey = e.entryKey; wrap.dataset.verdict = verdict;
+
   const row = elem('button', {
-    display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '8px 10px',
+    display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: stopGameId ? '8px 10px 8px 58px' : '8px 10px',
     borderRadius: '10px', cursor: 'pointer', font: 'inherit', textAlign: 'left',
     background: T.card, border: `1px solid ${T.border}`,
   });
-  row.type = 'button'; row.className = 'planner-row'; row.dataset.entryKey = e.entryKey; row.dataset.verdict = verdict;
+  row.type = 'button'; row.className = 'row-main';
 
   if (stopGameId) {
     const c = isCaught(e);
-    const tick = elem('span', {
+    const tick = elem('button', {
+      position: 'absolute', left: '7px', top: '50%', transform: 'translateY(-50%)', zIndex: '1',
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      width: '34px', height: '34px', borderRadius: '50%', flexShrink: 0, fontSize: '17px',
+      width: '44px', height: '44px', borderRadius: '50%', fontSize: '19px', padding: '0',
       background: c ? `color-mix(in oklab, ${T.owned} 20%, ${T.card})` : T.raised,
       border: `1.5px solid ${c ? T.owned : T.border}`, color: c ? T.owned : T.muted,
       cursor: 'pointer',
     }, c ? '◉' : '○');
-    tick.className = 'row-tick'; tick.setAttribute('role', 'button');
+    tick.type = 'button'; tick.className = 'row-tick';
     tick.title = c ? 'Caught — tap to unmark' : `Mark caught in ${state.acqStepLabel}`;
     tick.setAttribute('aria-label', tick.title);
+    tick.setAttribute('aria-pressed', String(c));
     tick.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      const prev = statusSnapshot(e);
       const patch = { caught: !c };
       if (!c) {
         // A fresh session catch sits on this cartridge until you transfer it.
@@ -853,8 +881,12 @@ function plannerRow(e, stopGameId, opportunistic) {
       }
       saveStatus(e.entryKey, patch, { membershipMayChange: true });
       renderPlanner(); // optimistic state is set synchronously — reflect it now
+      toast(`${e.name}${e.formLabel ? ` · ${e.formLabel}` : ''} — ${!c ? `caught in ${state.acqStepLabel}` : 'marked needed'}`, false, {
+        label: 'Undo',
+        onClick: () => { saveStatus(e.entryKey, prev, { membershipMayChange: true }); renderPlanner(); },
+      });
     });
-    row.append(tick);
+    wrap.append(tick);
   }
 
   const img = elem('img', { width: '40px', height: '40px', imageRendering: 'pixelated', flexShrink: 0 });
@@ -894,7 +926,8 @@ function plannerRow(e, stopGameId, opportunistic) {
   }
   row.append(pill);
   row.addEventListener('click', () => openSheet(e.entryKey));
-  return row;
+  wrap.append(row);
+  return wrap;
 }
 
 function acqChip(active, label, onClick) {
@@ -1322,7 +1355,13 @@ async function saveStatus(entryKey, patch, opts = {}) {
 
   if (opts.membershipMayChange) {
     const nowKeys = visibleEntries().map((x) => x.entryKey).join(',');
-    if (nowKeys === lastVisibleKeys) { restyleTile(entryKey); renderChrome(); } else render();
+    if (nowKeys === lastVisibleKeys) { restyleTile(entryKey); renderChrome(); }
+    else if (opts.keepInPlace && state.view === 'dex') {
+      // The toggled tile would leave the active filter (e.g. "Needed") — keep
+      // it visible, restyled, so the grid doesn't reflow under the user's
+      // finger and invite a second mis-tap. The next full render reconciles.
+      restyleTile(entryKey); renderChrome();
+    } else render();
   }
   if (opts.rerenderSheet && sheet.key === entryKey) renderSheetInto(e, true);
 
@@ -1343,9 +1382,25 @@ async function saveStatus(entryKey, patch, opts = {}) {
   }
 }
 
+/** Snapshot the fields a quick toggle can touch, for one-tap Undo. */
+function statusSnapshot(e) {
+  return e.status
+    ? { caught: Boolean(e.status.caught), gameOrigin: e.status.gameOrigin, method: e.status.method, notes: e.status.notes, inHome: e.status.inHome }
+    : { caught: false };
+}
+
 function toggle(entryKey) {
   const e = state.entries.find((x) => x.entryKey === entryKey);
-  saveStatus(entryKey, { caught: !isCaught(e) }, { membershipMayChange: true });
+  const prev = statusSnapshot(e);
+  const nowCaught = !isCaught(e);
+  saveStatus(entryKey, { caught: nowCaught }, { membershipMayChange: true, keepInPlace: true });
+  // A tile tap silently mutates data — a mis-tap while scrolling must be
+  // one tap away from recovery.
+  const mark = genderMark(e.gender);
+  toast(`${e.name}${e.formLabel ? ` · ${e.formLabel}` : ''}${mark ? ` ${mark}` : ''} — ${nowCaught ? 'marked caught' : 'marked needed'}`, false, {
+    label: 'Undo',
+    onClick: () => saveStatus(entryKey, prev, { membershipMayChange: true }),
+  });
 }
 
 /* ---------- detail sheet ---------- */
@@ -1992,6 +2047,10 @@ function init() {
     if (GENDER_PREFS.some((g) => g.key === savedGender)) state.genderPref = savedGender;
     const savedGroup = localStorage.getItem(ACQ_GROUP_KEY);
     if (savedGroup === 'zones' || savedGroup === 'dex') state.acqGroupMode = savedGroup;
+    // Phones discard background tabs mid-session — reopening must not dump a
+    // mid-checklist user back on the dex grid.
+    const savedAppView = localStorage.getItem(APP_VIEW_KEY);
+    if (savedAppView === 'planner') state.view = 'planner';
   } catch { /* ignore */ }
   syncTheme();
 
@@ -2006,7 +2065,12 @@ function init() {
   });
   el.emptyAction.addEventListener('click', () => {
     state.status = 'all'; state.query = ''; state.types = []; state.obtain = { owned: false, switch: false, shiny: false, gmax: false, tera: false };
-    state.gameFilter = ''; el.search.value = ''; render();
+    state.gameFilter = ''; el.search.value = '';
+    // "Clear filters" means "show me everything" — that includes an unnoticed
+    // pinned generation, the most common reason the dex looks empty.
+    state.gen = 0;
+    try { localStorage.setItem(GEN_KEY, '0'); } catch { /* ignore */ }
+    render();
   });
   let searchTimer;
   el.search.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => { state.query = el.search.value; render(); }, 200); });
@@ -2014,7 +2078,11 @@ function init() {
   el.importFile.addEventListener('change', () => { const f = el.importFile.files && el.importFile.files[0]; if (f) onImport(f); el.importFile.value = ''; });
   el.mirrorBtn.addEventListener('click', mirrorSprites);
   el.gamesBtn.addEventListener('click', openGamesModal);
-  el.viewBtn.addEventListener('click', () => { state.view = state.view === 'planner' ? 'dex' : 'planner'; render(); });
+  el.viewBtn.addEventListener('click', () => {
+    state.view = state.view === 'planner' ? 'dex' : 'planner';
+    try { localStorage.setItem(APP_VIEW_KEY, state.view); } catch { /* ignore */ }
+    render();
+  });
   pollMirror().catch(() => { el.mirrorBtn.hidden = true; });
   loadGames().then(render);
   loadTransfer().then(() => { if (sheet.key) { const e = state.entries.find((x) => x.entryKey === sheet.key); if (e) renderSheetInto(e, false); } });
