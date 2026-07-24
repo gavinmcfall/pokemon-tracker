@@ -626,6 +626,33 @@ test('hunt: remaining-only filter and cleared zones collapsing out of the way', 
   await expect(hunt.locator('.planner-row[data-entry-key="0006-default-male"]')).toBeVisible();
 });
 
+test('hunt: quick log finds any slot (gender variants visible) and logs it to the current game', async ({ page }) => {
+  await gotoView(page, 'planner');
+  await page.locator('#planner .acq-step[data-id="lgpe"]').click();
+  const hunt = page.locator('#hunt');
+
+  // Hippopotas isn't even catchable in Let's Go — quick log still finds every
+  // slot, ♂ and ♀ side by side with caught state visible.
+  await hunt.locator('.quick-log').fill('hippo');
+  const results = hunt.locator('[data-role="quick-log-results"]');
+  await expect(results.locator('.planner-row')).toHaveCount(2);
+  await expect(results.locator('.planner-row[data-entry-key="0449-default-female"]')).toContainText('♀');
+  await expect(results.locator('.planner-row[data-entry-key="0449-default-male"]')).toContainText('♂');
+
+  // One tap logs the ♀ as caught in THIS game.
+  await results.locator('.planner-row[data-entry-key="0449-default-female"] .row-tick').click();
+  await expect(results.locator('.planner-row[data-entry-key="0449-default-female"] .row-tick')).toHaveText('◉');
+
+  // The catch recorded the hunt game as origin → transfer backlog.
+  await hunt.locator('button[data-role="hunt-back"]').click();
+  await expect(page.locator('#planner .backlog .backlog-group')).toContainText('Let’s Go — 1 waiting');
+
+  // Dex-number search works too.
+  await page.locator('#planner .acq-step[data-id="lgpe"]').click();
+  await hunt.locator('.quick-log').fill('#449');
+  await expect(results.locator('.planner-row')).toHaveCount(2);
+});
+
 test('detail sheet: Escape closes; phones also close via scrim tap', async ({ page }, testInfo) => {
   await page.locator('.grid .tile-info').first().click();
   await expect(page.locator('.sheet-panel')).toBeVisible();
