@@ -162,6 +162,7 @@ const state = {
   huntGameId: null, // Hunt view: the game being played right now (persisted)
   huntLabel: '',
   remainingOnly: false, // Hunt: hide already-caught rows
+  quickLogQuery: '', // Hunt: quick-log search text (survives in-place re-renders)
   planConfigOpen: false, // planner strategy chips disclosure
   expandedZones: new Set(), // Hunt: user-expanded fully-caught zones
   collapsedZones: new Set(), // Hunt: user-collapsed zones
@@ -443,6 +444,9 @@ function tileStyle(e, isCaught) {
 }
 
 const genderMark = (g) => (g === 'male' ? '♂' : g === 'female' ? '♀' : '');
+// Colour-coded so ♂/♀ reads at a glance (theme-aware blue/pink).
+const GENDER_COLORS = { male: 'light-dark(#2E6DB8, #7EB2F0)', female: 'light-dark(#C93B72, #F48FB8)' };
+const genderColor = (g) => GENDER_COLORS[g] ?? 'var(--num)';
 
 /* ---------- sprite normalization ----------
    Source sprites frame their subject wildly differently (classic pixel art is
@@ -773,7 +777,7 @@ function tileMarkup(e) {
   // so it must stay visible without fighting the corner button for space.
   const name = elem('span', { fontSize: '13px', fontWeight: '700', color: 'var(--name)', lineHeight: '1.2', textAlign: 'center' }, e.name);
   const mark = genderMark(e.gender);
-  if (mark) name.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '600', color: 'var(--num)', marginLeft: '4px' }, mark));
+  if (mark) name.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '700', color: genderColor(e.gender), marginLeft: '4px' }, mark));
   // minHeight reserves one label line even when empty, so rows without form
   // labels don't sit dramatically shorter than rows full of megas/gmax.
   const form = elem('span', { fontSize: '10.5px', fontWeight: '400', color: 'var(--name)', opacity: '0.75', lineHeight: '1.15', textAlign: 'center', minHeight: '12px' }, e.formLabel ?? '');
@@ -1016,6 +1020,10 @@ function plannerRow(e, stopGameId, opportunistic) {
   const mid = elem('span', { display: 'flex', flexDirection: 'column', gap: '1px', flex: '1', minWidth: '0' });
   const title = elem('span', { fontSize: '13.5px', fontWeight: '700', color: T.text });
   title.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '11px', color: T.muted }, '#' + String(e.dex).padStart(4, '0') + ' '), document.createTextNode(e.name + (e.formLabel ? ` · ${e.formLabel}` : '')));
+  // Gender rides with the name — ♂/♀ slots sit side by side in these lists,
+  // and "which one am I missing" is the whole question.
+  const rowMark = genderMark(e.gender);
+  if (rowMark) title.append(elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '700', color: genderColor(e.gender), marginLeft: '4px' }, rowMark));
   mid.append(title);
   const detailText = stopGameId ? howWhereText(e, stopGameId)
     : verdict === 'ready' && p ? `catch in ${gameLabel(p.via) ?? p.via}`
@@ -1424,6 +1432,7 @@ function enterHunt(step) {
   state.acqStepExtraKeys = huntExtrasFor(step.id, state.acqStepKeys);
   state.expandedZones = new Set();
   state.collapsedZones = new Set();
+  state.quickLogQuery = '';
   try { localStorage.setItem(HUNT_KEY, step.id); } catch { /* ignore */ }
   setView('hunt');
 }
@@ -1542,6 +1551,31 @@ function renderHunt() {
   controls.append(remain);
   root.append(controls);
 
+  // Quick log: catch something off-list (a gender variant, an egg, a surprise
+  // encounter)? Type a few letters, see every matching slot with its caught
+  // state, tap the tick — logged to THIS game in seconds.
+  const ql = elem('div', { display: 'flex', flexDirection: 'column', gap: '6px' });
+  const qlInput = elem('input', {
+    minHeight: '44px', padding: '0 16px', width: '100%', borderRadius: '999px',
+    border: `1.5px solid ${T.border}`, background: T.card, color: T.text,
+    fontFamily: "'Atkinson Hyperlegible', system-ui, sans-serif", fontSize: '15px',
+  });
+  qlInput.type = 'search'; qlInput.className = 'quick-log';
+  qlInput.placeholder = `Quick log — search any Pokémon to mark caught in ${state.acqStepLabel}`;
+  qlInput.setAttribute('aria-label', 'Quick log: search any Pokémon');
+  for (const [k, v] of [['autocomplete', 'off'], ['autocorrect', 'off'], ['autocapitalize', 'none'], ['spellcheck', 'false'], ['enterkeyhint', 'search']]) qlInput.setAttribute(k, v);
+  qlInput.value = state.quickLogQuery ?? '';
+  const qlResults = elem('div', { display: 'flex', flexDirection: 'column', gap: '6px' });
+  qlResults.dataset.role = 'quick-log-results';
+  let qlTimer;
+  qlInput.addEventListener('input', () => {
+    clearTimeout(qlTimer);
+    qlTimer = setTimeout(() => { state.quickLogQuery = qlInput.value; renderQuickLog(qlResults, stopId); }, 150);
+  });
+  ql.append(qlInput, qlResults);
+  root.append(ql);
+  if (state.quickLogQuery) renderQuickLog(qlResults, stopId);
+
   const frag = document.createDocumentFragment();
   const shown = all.slice(0, PLANNER_ROW_CAP);
   huntZoneIndex = new Map();
@@ -1619,6 +1653,27 @@ function renderHunt() {
   }
   if (all.length === 0) {
     root.append(elem('div', { padding: '24px', textAlign: 'center', fontSize: '13px', color: T.muted }, 'Nothing left to catch here. 🎉'));
+  }
+}
+
+/** Quick log results: every slot matching the query, tick-to-log in this game. */
+function renderQuickLog(container, stopId) {
+  container.replaceChildren();
+  const q = (state.quickLogQuery ?? '').trim().toLowerCase();
+  if (q.length < 2) return;
+  const qNum = /^#?\d+$/.test(q) ? parseInt(q.replace('#', ''), 10) : null;
+  const matches = state.entries
+    .filter((e) => (qNum !== null ? e.dex === qNum
+      : e.name.toLowerCase().includes(q) || (e.formLabel ?? '').toLowerCase().includes(q)))
+    .sort((a, b) => a.dex - b.dex || a.entryKey.localeCompare(b.entryKey));
+  if (!matches.length) {
+    container.append(elem('div', { padding: '10px', textAlign: 'center', fontSize: '12.5px', color: T.muted }, `Nothing matches “${state.quickLogQuery.trim()}”.`));
+    return;
+  }
+  for (const e of matches.slice(0, 30)) container.append(plannerRow(e, stopId));
+  if (matches.length > 30) {
+    container.append(elem('div', { padding: '6px', textAlign: 'center', fontSize: '12px', color: T.muted },
+      `Showing 30 of ${matches.length} — keep typing to narrow.`));
   }
 }
 
@@ -1830,7 +1885,7 @@ function renderSheetInto(e, refocusCaught) {
   const title = elem('div', null); title.className = 'sheet-title';
   const numLine = elem('span', { fontFamily: "'IBM Plex Mono', monospace", fontSize: '12px', fontWeight: '600', letterSpacing: '0.08em', color: T.muted });
   numLine.textContent = '#' + String(e.dex).padStart(4, '0') + ' ';
-  numLine.append(elem('span', { fontSize: '13px' }, genderMark(e.gender)));
+  numLine.append(elem('span', { fontSize: '13px', fontWeight: '700', color: genderColor(e.gender) }, genderMark(e.gender)));
   title.append(numLine, elem('span', { fontSize: '19px', fontWeight: '700', lineHeight: '1.15' }, e.name));
   if (e.formLabel) title.append(elem('span', { fontSize: '13px', color: T.muted }, e.formLabel));
   const pills = elem('div', { display: 'flex', gap: '5px', marginTop: '3px' });
