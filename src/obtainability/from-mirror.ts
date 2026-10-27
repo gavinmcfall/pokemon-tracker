@@ -1,8 +1,9 @@
 import type pg from 'pg';
 import type { EvolveFrom, Obtainability } from '../types.js';
-import { VERSION_GROUP_TO_GAME } from './games.js';
+import { RELEASE_BY_ID, VERSION_GROUP_TO_GAME, releaseForVersion } from './games.js';
 import { computeObtainabilityFromSources, type ObtainSource } from './compute.js';
 import { AVAILABILITY_EXCLUSIONS, STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
+import { addEvidence, emptyEvidence, versionRestriction } from './versions.js';
 
 /** "kanto-route-25" → "Route 25"; "old-rod" → "old rod". */
 const REGION_PREFIX = /^(kanto|johto|hoenn|sinnoh|sinnoh-pt|unova|unova-b2w2|kalos|alola|galar|hisui|paldea)-/;
@@ -90,11 +91,17 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
   // locations win — and only for games the species is already available in.
   // Best-effort: absent schema (job never run) just means no supplement.
   const supByKey = new Map<string, string[]>();
+  // Per-cartridge catch evidence for version exclusives (see versions.ts).
+  const evidence = emptyEvidence();
   try {
-    const sup = await client.query<{ dex: string; game_id: string; locations: string[] }>(
-      `select dex::text, game_id, locations from "supplement"."serebii_locations"`,
+    const sup = await client.query<{ dex: string; game_id: string; version: string; locations: string[] }>(
+      `select dex::text, game_id, version, locations from "supplement"."serebii_locations"`,
     );
     for (const row of sup.rows) {
+      const release = row.version ? RELEASE_BY_ID.get(row.version) : undefined;
+      if (release && release.versionGroup === row.game_id && row.locations.length) {
+        addEvidence(evidence, Number(row.dex), row.game_id, release.releaseId);
+      }
       const key = `${row.dex}:${row.game_id}`;
       if (locsByKey.has(key)) continue; // mirror data wins
       const arr: string[] = [];
@@ -104,6 +111,19 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
       else supByKey.set(key, arr);
     }
   } catch { /* supplement schema not present — nothing to merge */ }
+
+  // Which cartridges each species is wild in (DLC versions fold into theirs).
+  const wildVersions = await client.query<{ species_id: string; version: string }>(
+    `select distinct p.species_id, v.identifier as version
+     from ${q('encounters')} e
+     join ${q('versions')} v on v.id = e.version_id
+     join ${q('pokemon')} p on p.id = e.pokemon_id`,
+  );
+  for (const row of wildVersions.rows) {
+    const releaseId = releaseForVersion(row.version);
+    const release = releaseId ? RELEASE_BY_ID.get(releaseId) : undefined;
+    if (release) addEvidence(evidence, Number(row.species_id), release.versionGroup, release.releaseId);
+  }
 
   // How each species is reached by evolution: its pre-evolution, and whether
   // every evolution path to it requires a trade (Kadabra → Alakazam).
@@ -128,17 +148,27 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
     if (arr) arr.push(source);
     else sourcesByDex.set(dex, [source]);
   };
-  for (const row of membership.rows) {
-    const gameId = VERSION_GROUP_TO_GAME[row.version_group];
-    if (!gameId) continue;
-    const dex = Number(row.species_id);
-    // Dex membership isn't obtainability for event-only listings (Jirachi is in
-    // the Hoenn dex but was never catchable in gen 3) — drop the curated
-    // exceptions; real routes come back via STATIC_AVAILABILITY.
-    if (AVAILABILITY_EXCLUSIONS[dex]?.includes(gameId)) continue;
+  // Dex membership isn't obtainability for event-only listings (Jirachi is in
+  // the Hoenn dex but was never catchable in gen 3) — drop the curated
+  // exceptions; real routes come back via STATIC_AVAILABILITY.
+  const members = membership.rows
+    .map((row) => ({ row, dex: Number(row.species_id), gameId: VERSION_GROUP_TO_GAME[row.version_group] }))
+    .filter((m): m is typeof m & { gameId: string } => Boolean(m.gameId) && !AVAILABILITY_EXCLUSIONS[m.dex]?.includes(m.gameId!));
+  const inGame = new Set(members.map((m) => `${m.dex}:${m.gameId}`));
+  const ctx = {
+    evidence,
+    evolvesFrom: (dex: number) => evolveFromByDex.get(dex)?.dex ?? null,
+    inGame: (dex: number, gameId: string) => inGame.has(`${dex}:${gameId}`),
+  };
+  for (const { row, dex, gameId } of members) {
     const key = `${dex}:${gameId}`;
     const locations = locsByKey.get(key) ?? supByKey.get(key);
-    push(dex, { gameId, method: row.wild ? 'wild' : 'available', ...(locations ? { locations } : {}) });
+    const versions = versionRestriction(dex, gameId, ctx);
+    push(dex, {
+      gameId, method: row.wild ? 'wild' : 'available',
+      ...(locations ? { locations } : {}),
+      ...(versions ? { versions } : {}),
+    });
   }
   // Curated static/gift as a supplement, for the rare mon a regional dex omits.
   for (const [dexStr, entries] of Object.entries(STATIC_AVAILABILITY)) {

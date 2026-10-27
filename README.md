@@ -325,6 +325,22 @@ unreleased groups are unmapped → "unknown"). Known limits (documented, not
 fabricated): obtainability is species-level (pokédex membership can't split
 Alolan vs Kantonian Raichu — regional-form exclusivity is future work).
 
+**Version exclusives** (`src/obtainability/versions.ts`). Dex membership is per
+version group, so it can't tell Scarlet from Violet; per-cartridge catch
+evidence can — mirror wild encounters per version (Gen 1 → SwSh; DLC versions
+like `the-crown-tundra-shield` fold into their cartridge) and the Serebii
+per-version rows (SV, BDSP). A game's availability entry carries
+`versions: ['scarlet']` when only some of its cartridges can catch it.
+Evolutions inherit their pre-evolution's cartridges (Tyranitar is wherever
+Larvitar is), unioned with their own. Never guessed: a game is only restricted
+when the evidence covers every one of its cartridges, and any curated
+gift/static source lifts the restriction. The planner then counts that entry as
+catchable only with one of those cartridges — owning Scarlet leaves a
+Violet-only species at *Need a game*, and the shopping list / itinerary can name
+a single cartridge (`violet`) rather than the pair. Known gap: an exclusive
+reachable in the other cartridge only by an in-game trade or static encounter
+the data doesn't record would be under-claimed.
+
 The seed sources obtainability best-effort: if the mirror schema isn't populated
 yet it writes the catalogue and skips obtainability (leaving prior values), so
 run the `pokeapi-mirror` job before the seed.
@@ -350,7 +366,7 @@ version + Legends: Arceus). `node dist/supplement/run.js`:
 - the seed then merges these as **gap-fill only**: mirror-derived locations
   always win, and a supplement row never invents availability the dex
   membership doesn't already assert. Per-version rows (Scarlet ≠ Violet) are
-  stored separately — groundwork for version-exclusive planning.
+  stored separately and feed version exclusives (below).
 
 Run order when refreshing everything: mirror → supplement → seed.
 

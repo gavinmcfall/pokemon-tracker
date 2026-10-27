@@ -32,7 +32,8 @@ const GAME_LABELS = {
   sm:'Sun/Moon', usum:'Ultra Sun/Ultra Moon', lgpe:'Let’s Go', swsh:'Sword/Shield',
   bdsp:'Brilliant Diamond/Shining Pearl', pla:'Legends: Arceus', sv:'Scarlet/Violet', go:'Pokémon GO',
 };
-const gameLabel = (slug) => (slug ? (GAME_LABELS[slug] ?? slug.toUpperCase()) : null);
+// Release ids ('violet') label from the games list once it has loaded.
+const gameLabel = (slug) => (slug ? (GAME_LABELS[slug] ?? state.releaseLabels.get(slug) ?? slug.toUpperCase()) : null);
 
 const LD = (l, d) => `light-dark(${l}, ${d})`;
 const T = {
@@ -157,6 +158,9 @@ const state = {
   gameFilter: '',
   games: [],
   ownedGroupIds: new Set(),
+  ownedReleaseIds: new Set(), // the exact cartridges owned (version exclusives)
+  releaseGroup: new Map(), // release id of a paired game ('violet') -> its group ('sv')
+  releaseLabels: new Map(), // release id -> label ('violet' -> 'Violet')
   transfer: {}, // gameId -> TransferInfo (how that game reaches HOME)
   view: 'dex', // 'dex' | 'planner' | 'hunt'
   huntGameId: null, // Hunt view: the game being played right now (persisted)
@@ -265,10 +269,35 @@ function bestHomeRoute(e) {
 
 // Games are individual releases (Red and Blue are separate); obtainability
 // availability is per version-group. Owning either release lights up its group,
-// so the "owned" signal is keyed by the owned releases' versionGroups.
+// so the "owned" signal is keyed by the owned releases' versionGroups — except a
+// version exclusive (availability `versions`), which needs one of its cartridges.
 function setGamesState(games) {
   state.games = games;
   state.ownedGroupIds = new Set(games.filter((g) => g.owned).map((g) => g.versionGroup));
+  state.ownedReleaseIds = new Set(games.filter((g) => g.owned).map((g) => g.gameId));
+  state.releaseLabels = new Map(games.map((g) => [g.gameId, g.label]));
+  const perGroup = new Map();
+  for (const g of games) perGroup.set(g.versionGroup, (perGroup.get(g.versionGroup) ?? 0) + 1);
+  state.releaseGroup = new Map(games.filter((g) => perGroup.get(g.versionGroup) > 1).map((g) => [g.gameId, g.versionGroup]));
+}
+
+/** Can you catch this availability entry in a game you own? */
+const ownsAvail = (a) => state.ownedGroupIds.has(a.gameId)
+  && (!a.versions || a.versions.some((v) => state.ownedReleaseIds.has(v)));
+
+/** "Violet only" for a version exclusive, else null. */
+const versionsNote = (a) => (a.versions && a.versions.length ? `${a.versions.map(gameLabel).join(' / ')} only` : null);
+
+/**
+ * The availability entry for a planner stop. A stop is a version group ('sv')
+ * or, for version exclusives, one cartridge ('violet') — which matches its
+ * group's entry only when that cartridge has it.
+ */
+function availAt(e, stopId) {
+  if (!hasEnrichment(e)) return null;
+  const group = state.releaseGroup.get(stopId);
+  if (group) return e.availability.find((a) => a.gameId === group && (!a.versions || a.versions.includes(stopId))) ?? null;
+  return e.availability.find((a) => a.gameId === stopId) ?? null;
 }
 
 const el = {};
@@ -540,7 +569,7 @@ function matchesFilters(e) {
     // "Owned" hides only entries we KNOW aren't in a game you own; entries with
     // no availability data stay visible (unknown, never a guess) — same rule as
     // the other obtainability filters below.
-    if (ob.owned && state.ownedGroupIds.size > 0 && !e.availability.some((a) => state.ownedGroupIds.has(a.gameId))) return false;
+    if (ob.owned && state.ownedGroupIds.size > 0 && !e.availability.some(ownsAvail)) return false;
     if (ob.switch && !e.catchableOnSwitch) return false;
     if (ob.shiny && !e.shinyLegalSomewhere) return false;
     if (ob.gmax && !e.gmaxCapable) return false;
@@ -932,8 +961,14 @@ const NO_ENCOUNTER_DATA = new Set(['bdsp', 'pla', 'sv', 'za', 'ww', 'go']);
 
 /** The "how/where in THIS game" line for a checklist row. */
 function howWhereText(e, gameId) {
-  const a = hasEnrichment(e) ? e.availability.find((x) => x.gameId === gameId) : null;
+  const a = availAt(e, gameId);
   if (!a) return 'not catchable here';
+  const only = versionsNote(a);
+  const text = howWhereBase(e, a, state.releaseGroup.get(gameId) ?? gameId);
+  return only ? `${only} · ${text}` : text;
+}
+
+function howWhereBase(e, a, gameId) {
   const locs = a.locations && a.locations.length ? ` — ${a.locations.join(', ')}` : '';
   const evolve = e.evolveFrom ? `evolve from ${e.evolveFrom.name}${e.evolveFrom.trade ? ' · TRADE EVO' : ''}` : null;
   if (a.method === 'wild') return `wild${locs}`;
@@ -1418,8 +1453,16 @@ function huntExtrasFor(stepId, assignedKeys) {
     .filter((e) => !isCaught(e)
       && !assignedKeys.has(e.entryKey)
       && ['ready', 'need-game'].includes(state.plan[e.entryKey]?.verdict)
-      && hasEnrichment(e) && e.availability.some((a) => a.gameId === stepId))
+      && catchableAtStop(e, stepId))
     .map((e) => e.entryKey));
+}
+
+/** Catchable at this stop. A group stop skips exclusives of cartridges you don't have. */
+function catchableAtStop(e, stopId) {
+  const a = availAt(e, stopId);
+  if (!a) return false;
+  if (state.releaseGroup.has(stopId) || !a.versions) return true;
+  return a.versions.some((v) => state.ownedReleaseIds.has(v));
 }
 
 function enterHunt(step) {
@@ -1585,7 +1628,7 @@ function renderHunt() {
     // zone; biggest hunting grounds first, catch-all buckets sink to the end.
     const zones = new Map();
     for (const item of shown) {
-      const a = hasEnrichment(item.e) ? item.e.availability.find((x) => x.gameId === stopId) : null;
+      const a = availAt(item.e, stopId);
       const zone = a?.locations?.length ? a.locations[0]
         : (item.e.evolveFrom && (a?.method === 'available' || a?.method === 'evolve')) ? HUNT_EVOLVE
         : HUNT_NOWHERE;
@@ -2121,7 +2164,8 @@ function renderSheetInto(e, refocusCaught) {
       for (const a of rows) {
         const locked = (e.shinyLockedIn || []).includes(a.gameId);
         const origin = (e.originGames || []).includes(a.gameId);
-        const owned = state.ownedGroupIds.has(a.gameId);
+        const owned = ownsAvail(a);
+        const only = versionsNote(a);
         const chip = elem('span', {
           display: 'inline-flex', alignItems: 'center', gap: '7px', minHeight: '34px', padding: '0 12px', borderRadius: '999px',
           background: owned ? `color-mix(in oklab, ${T.owned} 12%, ${T.raised})` : T.raised,
@@ -2131,12 +2175,14 @@ function renderSheetInto(e, refocusCaught) {
         chip.title = `${a.label} · ${a.method}`
           + (a.locations && a.locations.length ? ` · ${a.locations.join(', ')}` : '')
           + (locked ? ' · shiny-locked' : a.shinyPossible ? ' · shiny possible' : ' · no shinies')
+          + (only ? ` · ${only}` : '')
           + (origin ? ' · origin game' : '') + (owned ? ' · in a game you own' : '');
         chip.append(elem('span', { fontWeight: '700' }, a.label), elem('span', { opacity: '0.75' }, a.method));
         chip.append(elem('span', {
           color: (a.shinyPossible && !locked) ? `color-mix(in oklab, ${c1} 70%, ${T.text})` : T.muted,
           textDecoration: locked ? 'line-through' : 'none', opacity: (!a.shinyPossible && !locked) ? '0.35' : '1', fontSize: '13px',
         }, '✦'));
+        if (only) chip.append(elem('span', { fontSize: '9.5px', fontWeight: '700', letterSpacing: '0.06em', color: T.gold }, only.toUpperCase()));
         if (owned) chip.append(elem('span', { fontSize: '9.5px', fontWeight: '700', letterSpacing: '0.06em', color: T.owned }, '✓ OWNED'));
         if (origin) chip.append(elem('span', { fontSize: '9.5px', fontWeight: '700', letterSpacing: '0.06em', color: T.muted }, 'ORIGIN'));
         chips.append(chip);

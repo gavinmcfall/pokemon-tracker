@@ -158,6 +158,25 @@ export const RELEASES: ReleaseMeta[] = [
 
 export const RELEASE_BY_ID = new Map(RELEASES.map((r) => [r.releaseId, r]));
 
+/** Ownable cartridges per version group, in release order (services excluded). */
+export const RELEASES_BY_GROUP = new Map<string, string[]>();
+for (const r of RELEASES) {
+  if (r.platform === 'service') continue;
+  const arr = RELEASES_BY_GROUP.get(r.versionGroup);
+  if (arr) arr.push(r.releaseId);
+  else RELEASES_BY_GROUP.set(r.versionGroup, [r.releaseId]);
+}
+
+// DLC versions are played on the base cartridge: `the-crown-tundra-sword` is Sword.
+const DLC_VERSION_PREFIX = /^the-(isle-of-armor|crown-tundra|teal-mask|indigo-disk)-/;
+
+/** PokéAPI version slug → the release (cartridge) it's played on, or null if unmapped. */
+export function releaseForVersion(version: string): string | null {
+  const id = version.replace(DLC_VERSION_PREFIX, '');
+  const release = RELEASE_BY_ID.get(id);
+  return release && release.platform !== 'service' ? release.releaseId : null;
+}
+
 /** Release id of the Pokémon Bank service (gates pre-Switch routes into HOME). */
 export const BANK_RELEASE_ID = 'bank';
 

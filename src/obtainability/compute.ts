@@ -76,6 +76,8 @@ export interface ObtainSource {
   method: ObtainMethod;
   /** Where in this game (mirror encounter data), e.g. "Route 119 (super rod)". */
   locations?: string[];
+  /** Only these cartridges of the game have it (version exclusive); absent = all. */
+  versions?: string[];
 }
 
 export interface SourcedInput {
@@ -101,26 +103,31 @@ export function computeObtainabilityFromSources(input: SourcedInput): Obtainabil
   const { dex, generation, hasGenderDifferences, hasGmaxVariety } = input;
   const shinyLockedEverywhere = SHINY_LOCKED_EVERYWHERE.has(dex);
 
-  const byGame = new Map<string, { method: string; locations: string[] }>();
+  // versions: null = every cartridge. Any unrestricted source (a curated gift,
+  // a static) lifts a restriction; restricted sources union.
+  const byGame = new Map<string, { method: string; locations: string[]; versions: string[] | null }>();
   for (const s of input.sources) {
     if (!GAME_BY_ID.has(s.gameId)) continue;
     const existing = byGame.get(s.gameId);
     if (!existing) {
-      byGame.set(s.gameId, { method: s.method, locations: [...(s.locations ?? [])] });
+      byGame.set(s.gameId, { method: s.method, locations: [...(s.locations ?? [])], versions: s.versions ? [...s.versions] : null });
     } else {
       existing.method = moreDirect(existing.method, s.method);
       for (const loc of s.locations ?? []) if (!existing.locations.includes(loc)) existing.locations.push(loc);
+      if (!s.versions) existing.versions = null;
+      else if (existing.versions) for (const v of s.versions) if (!existing.versions.includes(v)) existing.versions.push(v);
     }
   }
 
   const availability: AvailabilityEntry[] = [...byGame.entries()]
     .sort(([a], [b]) => byReleaseOrder(a, b))
-    .map(([gameId, { method, locations }]) => {
+    .map(([gameId, { method, locations, versions }]) => {
       const meta = GAME_BY_ID.get(gameId)!;
       const shinyPossible = !shinyLockedEverywhere && !(STATIC_SHINY_LOCK[gameId]?.includes(dex));
       return {
         gameId, label: meta.label, platform: meta.platform, method, shinyPossible,
         ...(locations.length ? { locations: locations.slice(0, MAX_LOCATIONS) } : {}),
+        ...(versions ? { versions } : {}),
       };
     });
 
