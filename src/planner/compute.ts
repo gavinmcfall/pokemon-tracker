@@ -1,4 +1,4 @@
-import type { EntryWithStatus, GameOwnership, OwnershipMethod } from '../types.js';
+import type { AvailabilityEntry, EntryWithStatus, GameOwnership, OwnershipMethod } from '../types.js';
 import { BANK_RELEASE_ID, GAME_BY_ID, RELEASE_BY_ID } from '../obtainability/games.js';
 import { transferFor, type TransferInfo } from '../obtainability/transfer.js';
 
@@ -13,6 +13,11 @@ export type { GameOwnership };
  * as a route — romhack captures can't legitimately reach HOME. Bank gates every
  * pre-Switch route. Anything whose transfer route is `unknown`/`none` is never
  * called Ready — we never guess a path that may not exist.
+ *
+ * Version exclusives: an availability entry with `versions` (Larvitar is
+ * Scarlet-only) is catchable only with one of those cartridges, so ids in
+ * `needs`, acquisitions and itinerary steps may be a single release ('violet')
+ * as well as a version group ('sv'). Transfer routes stay per group.
  */
 
 export type Verdict = 'have' | 'ready' | 'need-game' | 'unknown' | 'event-only';
@@ -30,7 +35,8 @@ export interface SpeciesPlan {
   /**
    * For `need-game`: the minimal acquisitions to make a route work, as an
    * AND-of-ORs — each inner array is "acquire ANY one of these". Ids are
-   * version-group gameIds, or 'bank' for the Pokémon Bank service.
+   * version-group gameIds, release ids for version exclusives ('violet'), or
+   * 'bank' for the Pokémon Bank service.
    */
   needs?: string[][];
 }
@@ -45,7 +51,7 @@ export interface PlanSummary {
 }
 
 export interface Acquisition {
-  id: string; // version-group gameId, or 'bank'
+  id: string; // version-group gameId, release id (version exclusive), or 'bank'
   label: string;
   kind: 'game' | 'service';
   /** How many still-blocked species this step flips to Ready (in sequence). */
@@ -63,18 +69,70 @@ export interface PlanInput {
   entries: EntryWithStatus[];
   /** Version-groups owned via a HOME-legal method (see ownedRouteGroups). */
   ownedRouteGroups: Iterable<string>;
+  /** Cartridges owned via a HOME-legal method (see ownedRouteReleases). When
+   *  omitted, version exclusives are judged by group alone. */
+  ownedReleases?: Iterable<string>;
   hasBank: boolean;
 }
 
+/** Cartridges owned by any of `methods` (services excluded). */
+function ownedReleasesBy(ownership: GameOwnership[], methods: OwnershipMethod[]): Set<string> {
+  const out = new Set<string>();
+  for (const o of ownership) {
+    if (!o.methods.some((m) => methods.includes(m))) continue;
+    const release = RELEASE_BY_ID.get(o.gameId);
+    if (release && release.platform !== 'service') out.add(release.releaseId);
+  }
+  return out;
+}
+
+const groupsOf = (releases: Set<string>) => new Set([...releases].map((r) => RELEASE_BY_ID.get(r)!.versionGroup));
+
 /** Version-groups reachable as a HOME-legal source from the owner's games. */
 export function ownedRouteGroups(ownership: GameOwnership[]): Set<string> {
-  const groups = new Set<string>();
-  for (const o of ownership) {
-    if (!o.methods.some((m) => HOME_LEGAL_METHODS.includes(m))) continue;
-    const release = RELEASE_BY_ID.get(o.gameId);
-    if (release && release.platform !== 'service') groups.add(release.versionGroup);
-  }
-  return groups;
+  return groupsOf(ownedReleasesBy(ownership, HOME_LEGAL_METHODS));
+}
+
+/** Cartridges owned via a HOME-legal method (for version exclusives). */
+export function ownedRouteReleases(ownership: GameOwnership[]): Set<string> {
+  return ownedReleasesBy(ownership, HOME_LEGAL_METHODS);
+}
+
+/**
+ * What the owner can play: version groups plus, when known, the exact
+ * cartridges. `releases: null` = not release-aware (exclusives judged by group).
+ */
+interface Owned { groups: Set<string>; releases: Set<string> | null }
+
+/** The version group an acquisition/step id belongs to ('violet' → 'sv'). */
+export function groupOfId(id: string): string {
+  return GAME_BY_ID.has(id) ? id : (RELEASE_BY_ID.get(id)?.versionGroup ?? id);
+}
+
+type CatchOption = Pick<AvailabilityEntry, 'gameId' | 'versions'>;
+
+/** Can the owner catch this availability entry with what they play? */
+function canCatch(a: CatchOption, own: Owned): boolean {
+  if (!own.groups.has(a.gameId)) return false;
+  return !a.versions || !own.releases || a.versions.some((v) => own.releases!.has(v));
+}
+
+/** What to acquire to catch this entry: any one of these ids. */
+function catchNeed(a: CatchOption, own: Owned): string[] {
+  return a.versions && own.releases ? [...a.versions] : [a.gameId];
+}
+
+/** Own one more thing: a cartridge also lights up its group. */
+function acquire(own: Owned, id: string): Owned {
+  const groups = new Set(own.groups);
+  const releases = own.releases ? new Set(own.releases) : null;
+  groups.add(groupOfId(id));
+  if (releases && RELEASE_BY_ID.has(id)) releases.add(id);
+  return { groups, releases };
+}
+
+function idLabel(id: string): string {
+  return GAME_BY_ID.get(id)?.label ?? RELEASE_BY_ID.get(id)?.label ?? id;
 }
 
 /** Is the Bank service active (owned via subscription)? */
@@ -82,9 +140,9 @@ export function hasBankFrom(ownership: GameOwnership[]): boolean {
   return ownership.some((o) => o.gameId === BANK_RELEASE_ID && o.methods.length > 0);
 }
 
-/** Can this route be completed right now with the given owned groups + Bank? */
-function routeComplete(info: TransferInfo, owned: Set<string>, bank: boolean): boolean {
-  if (!owned.has(info.gameId)) return false;
+/** Can this route be completed right now? `catchable`: you can catch it in the source game. */
+function routeComplete(info: TransferInfo, catchable: boolean, owned: Set<string>, bank: boolean): boolean {
+  if (!catchable) return false;
   switch (info.reach) {
     case 'native':
     case 'go':
@@ -101,11 +159,12 @@ function routeComplete(info: TransferInfo, owned: Set<string>, bank: boolean): b
 /**
  * What's still missing to complete this route, as an AND-of-ORs — or null if the
  * route can never be completed by acquiring things (unknown/none transfer).
+ * `need`: what to acquire to catch it in the source game (null = catchable).
  */
-function routeMissing(info: TransferInfo, owned: Set<string>, bank: boolean): string[][] | null {
+function routeMissing(info: TransferInfo, need: string[] | null, owned: Set<string>, bank: boolean): string[][] | null {
   if (info.reach === 'unknown' || info.reach === 'none') return null;
   const missing: string[][] = [];
-  if (!owned.has(info.gameId)) missing.push([info.gameId]);
+  if (need) missing.push(need);
   if ((info.reach === 'bank' || info.reach === 'chain') && !bank) missing.push([BANK_RELEASE_ID]);
   if (info.reach === 'chain') {
     for (const hop of info.requiresGames) if (!hop.some((g) => owned.has(g))) missing.push(hop);
@@ -116,10 +175,16 @@ function routeMissing(info: TransferInfo, owned: Set<string>, bank: boolean): st
 // Most-direct transfer wins when a species is available more than one usable way.
 const REACH_RANK: Record<string, number> = { native: 0, go: 1, bank: 2, chain: 3 };
 
-interface Routable { entryKey: string; gameIds: string[] }
+interface Routable { entryKey: string; options: CatchOption[] }
+
+const readyVia = (a: CatchOption, own: Owned, bank: boolean) =>
+  routeComplete(transferFor(a.gameId), canCatch(a, own), own.groups, bank);
 
 export function computePlan(input: PlanInput): Plan {
-  const owned = new Set(input.ownedRouteGroups);
+  const own: Owned = {
+    groups: new Set(input.ownedRouteGroups),
+    releases: input.ownedReleases ? new Set(input.ownedReleases) : null,
+  };
   const bank = input.hasBank;
   const species: SpeciesPlan[] = [];
   const summary: PlanSummary = { have: 0, ready: 0, needGame: 0, unknown: 0, eventOnly: 0, total: 0 };
@@ -138,7 +203,7 @@ export function computePlan(input: PlanInput): Plan {
     let readyInfo: TransferInfo | null = null;
     for (const a of ob.availability) {
       const info = transferFor(a.gameId);
-      if (routeComplete(info, owned, bank) && (!readyInfo || (REACH_RANK[info.reach] ?? 9) < (REACH_RANK[readyInfo.reach] ?? 9))) {
+      if (readyVia(a, own, bank) && (!readyInfo || (REACH_RANK[info.reach] ?? 9) < (REACH_RANK[readyInfo.reach] ?? 9))) {
         readyInfo = info;
       }
     }
@@ -150,18 +215,18 @@ export function computePlan(input: PlanInput): Plan {
 
     // Not ready — cheapest missing route, if any is routable at all.
     let best: string[][] | null = null;
-    const gameIds: string[] = [];
+    const options: CatchOption[] = [];
     for (const a of ob.availability) {
       const info = transferFor(a.gameId);
-      const miss = routeMissing(info, owned, bank);
+      const miss = routeMissing(info, canCatch(a, own) ? null : catchNeed(a, own), own.groups, bank);
       if (miss === null) continue;
-      gameIds.push(info.gameId);
+      options.push(a);
       if (best === null || miss.length < best.length) best = miss;
     }
     if (best) {
       species.push({ entryKey: e.entryKey, dex: e.dex, verdict: 'need-game', needs: best });
       summary.needGame += 1;
-      blocked.push({ entryKey: e.entryKey, gameIds });
+      blocked.push({ entryKey: e.entryKey, options });
     } else {
       // Available only in unknown/none-transfer games (or no availability) → can't route.
       species.push({ entryKey: e.entryKey, dex: e.dex, verdict: 'unknown' });
@@ -169,7 +234,7 @@ export function computePlan(input: PlanInput): Plan {
     }
   }
 
-  return { species, summary, acquisitions: planAcquisitions(blocked, owned, bank) };
+  return { species, summary, acquisitions: planAcquisitions(blocked, own, bank) };
 }
 
 /**
@@ -178,32 +243,29 @@ export function computePlan(input: PlanInput): Plan {
  * Captures combos across rounds (e.g. buy Bank first — unlocking many — then the
  * game that needs it). Bounded so a pathological input can't loop forever.
  */
-function planAcquisitions(blocked: Routable[], initialOwned: Set<string>, initialBank: boolean): Acquisition[] {
-  const owned = new Set(initialOwned);
+function planAcquisitions(blocked: Routable[], initialOwned: Owned, initialBank: boolean): Acquisition[] {
+  let owned = initialOwned;
   let bank = initialBank;
   let remaining = blocked;
   const out: Acquisition[] = [];
 
-  const isReady = (s: Routable, own: Set<string>, bk: boolean) =>
-    s.gameIds.some((gid) => routeComplete(transferFor(gid), own, bk));
+  const isReady = (s: Routable, own: Owned, bk: boolean) => s.options.some((a) => readyVia(a, own, bk));
 
   for (let round = 0; round < 24 && remaining.length > 0; round += 1) {
     const candidates = new Set<string>();
     if (!bank) candidates.add(BANK_RELEASE_ID);
     for (const s of remaining) {
-      for (const gid of s.gameIds) {
-        const info = transferFor(gid);
-        if (!owned.has(info.gameId)) candidates.add(info.gameId);
-        for (const hop of info.requiresGames) for (const g of hop) if (!owned.has(g)) candidates.add(g);
+      for (const a of s.options) {
+        if (!canCatch(a, owned)) for (const id of catchNeed(a, owned)) candidates.add(id);
+        for (const hop of transferFor(a.gameId).requiresGames) for (const g of hop) if (!owned.groups.has(g)) candidates.add(g);
       }
     }
 
     let bestId: string | null = null;
     let bestCount = 0;
     for (const cand of candidates) {
-      const own2 = new Set(owned);
-      let bank2 = bank;
-      if (cand === BANK_RELEASE_ID) bank2 = true; else own2.add(cand);
+      const bank2 = bank || cand === BANK_RELEASE_ID;
+      const own2 = cand === BANK_RELEASE_ID ? owned : acquire(owned, cand);
       let count = 0;
       for (const s of remaining) if (isReady(s, own2, bank2)) count += 1;
       if (count > bestCount) { bestCount = count; bestId = cand; }
@@ -213,8 +275,8 @@ function planAcquisitions(blocked: Routable[], initialOwned: Set<string>, initia
       // Stalled: every remaining unlock needs ≥2 acquisitions. If Bank is off and
       // some route needs it, activate Bank as infrastructure (it may unlock 0 now
       // but lets the next round's game purchases count) — then retry. Otherwise done.
-      const bankWouldHelp = !bank && remaining.some((s) => s.gameIds.some((gid) => {
-        const r = transferFor(gid).reach;
+      const bankWouldHelp = !bank && remaining.some((s) => s.options.some((a) => {
+        const r = transferFor(a.gameId).reach;
         return r === 'bank' || r === 'chain';
       }));
       if (!bankWouldHelp) break;
@@ -226,7 +288,7 @@ function planAcquisitions(blocked: Routable[], initialOwned: Set<string>, initia
     }
 
     if (bestId === BANK_RELEASE_ID) { bank = true; out.push({ id: BANK_RELEASE_ID, label: 'Pokémon Bank', kind: 'service', unlocks: bestCount }); }
-    else { owned.add(bestId); out.push({ id: bestId, label: GAME_BY_ID.get(bestId)?.label ?? bestId, kind: 'game', unlocks: bestCount }); }
+    else { owned = acquire(owned, bestId); out.push({ id: bestId, label: idLabel(bestId), kind: 'game', unlocks: bestCount }); }
     remaining = remaining.filter((s) => !isReady(s, owned, bank));
   }
   return out;
@@ -255,21 +317,14 @@ const MODE_METHODS: Record<AcquireMode, OwnershipMethod[]> = {
 };
 
 export function ownedRouteGroupsForMode(ownership: GameOwnership[], mode: AcquireMode): Set<string> {
-  const allowed = MODE_METHODS[mode];
-  const groups = new Set<string>();
-  for (const o of ownership) {
-    if (!o.methods.some((m) => allowed.includes(m))) continue;
-    const release = RELEASE_BY_ID.get(o.gameId);
-    if (release && release.platform !== 'service') groups.add(release.versionGroup);
-  }
-  return groups;
+  return groupsOf(ownedReleasesBy(ownership, MODE_METHODS[mode]));
 }
 
 /** How a recommended new acquisition would be obtained, given the mode. */
 export type AcquireVia = 'cartridge' | 'emulator' | 'install' | 'subscription';
 function acquireVia(id: string, mode: AcquireMode): AcquireVia {
   if (id === BANK_RELEASE_ID) return 'subscription';
-  if (GAME_BY_ID.get(id)?.platform === 'mobile') return 'install'; // Pokémon GO
+  if (GAME_BY_ID.get(groupOfId(id))?.platform === 'mobile') return 'install'; // Pokémon GO
   return mode === 'cartridge-only' || mode === 'cartridge-first' ? 'cartridge' : 'emulator';
 }
 
@@ -317,10 +372,29 @@ function tierOf(reach: string): number {
   return 99; // unknown | none — not catchable-into-HOME
 }
 
-function stepFor(id: string, entryKeys: string[], owned: Set<string>, mode: AcquireMode, prereq: boolean): AcquireStep {
+/** Do you own this stop? A group stop: any of its cartridges. A cartridge stop: that one. */
+function ownsId(id: string, own: Owned): boolean {
+  return GAME_BY_ID.has(id) ? own.groups.has(id) : Boolean(own.releases?.has(id));
+}
+
+/**
+ * The itinerary stop(s) that catch this entry: its group — unless it's a version
+ * exclusive your copy doesn't cover, then the cartridge(s) that have it. Owning
+ * both Scarlet and Violet puts Scarlet-only species on a Scarlet stop.
+ */
+function stopIdsFor(a: CatchOption, own: Owned): string[] {
+  if (!a.versions || !own.releases) return [a.gameId];
+  const mine = [...own.releases].filter((r) => RELEASE_BY_ID.get(r)!.versionGroup === a.gameId);
+  if (mine.length && mine.every((r) => a.versions!.includes(r))) return [a.gameId];
+  return [...a.versions];
+}
+
+function stepFor(id: string, entryKeys: string[], own: Owned, mode: AcquireMode, prereq: boolean): AcquireStep {
   const isBank = id === BANK_RELEASE_ID;
-  const meta = isBank ? { label: 'Pokémon Bank', platform: 'service', generation: 0 } : GAME_BY_ID.get(id);
-  const isOwned = !isBank && owned.has(id);
+  const group = GAME_BY_ID.get(groupOfId(id));
+  const meta = isBank ? { label: 'Pokémon Bank', platform: 'service', generation: 0 }
+    : group && { label: idLabel(id), platform: group.platform, generation: group.generation };
+  const isOwned = !isBank && ownsId(id, own);
   return {
     id,
     label: meta?.label ?? id,
@@ -365,7 +439,8 @@ export function computeAcquisitionPlan(input: {
   mode: AcquireMode;
   rank: AcquireRank;
 }): AcquirePlan {
-  const owned = ownedRouteGroupsForMode(input.ownership, input.mode);
+  const releases = ownedReleasesBy(input.ownership, MODE_METHODS[input.mode]);
+  const own: Owned = { groups: groupsOf(releases), releases };
   const hasBank = hasBankFrom(input.ownership);
 
   const missing = input.entries.filter((e) => !e.status?.caught);
@@ -381,7 +456,8 @@ export function computeAcquisitionPlan(input: {
     for (const a of ob.availability) {
       const t = tierOf(transferFor(a.gameId).reach);
       if (t === 99) continue;
-      (byTier.get(t) ?? byTier.set(t, new Set()).get(t)!).add(a.gameId);
+      const tierSet = byTier.get(t) ?? byTier.set(t, new Set()).get(t)!;
+      for (const id of stopIdsFor(a, own)) tierSet.add(id);
       if (t < minTier) minTier = t;
     }
     if (minTier === 99) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'no known route' }); continue; }
@@ -391,16 +467,23 @@ export function computeAcquisitionPlan(input: {
   // Greedy set-cover: each round, the game catching the most still-uncovered species.
   const uncovered = new Set(speciesGames.keys());
   const usedPlatforms = new Set<string>();
-  for (const g of owned) { const m = GAME_BY_ID.get(g); if (m) usedPlatforms.add(m.platform); }
+  for (const g of own.groups) { const m = GAME_BY_ID.get(g); if (m) usedPlatforms.add(m.platform); }
 
   const catchStops: { id: string; entryKeys: string[] }[] = [];
   while (uncovered.size > 0) {
     const cover = new Map<string, string[]>();
     for (const ek of uncovered) for (const g of speciesGames.get(ek)!) (cover.get(g) ?? cover.set(g, []).get(g)!).push(ek);
+    // Buying a cartridge also catches everything its (unowned) group offers:
+    // Violet covers Violet exclusives plus the shared Scarlet/Violet species.
+    for (const [id, eks] of cover) {
+      const group = groupOfId(id);
+      if (group === id || own.groups.has(group)) continue;
+      for (const ek of cover.get(group) ?? []) if (!eks.includes(ek)) eks.push(ek);
+    }
     let best: { id: string; n: number; owned: boolean; gen: number; plat: string } | null = null;
     for (const [id, eks] of cover) {
-      const m = GAME_BY_ID.get(id);
-      const cand = { id, n: eks.length, owned: owned.has(id), gen: m?.generation ?? 99, plat: m?.platform ?? 'x' };
+      const m = GAME_BY_ID.get(groupOfId(id));
+      const cand = { id, n: eks.length, owned: ownsId(id, own), gen: m?.generation ?? 99, plat: m?.platform ?? 'x' };
       if (!best || coverBetter(cand, best, input.rank, usedPlatforms)) best = cand;
     }
     if (!best) break;
@@ -411,27 +494,27 @@ export function computeAcquisitionPlan(input: {
   }
 
   if (input.rank === 'oldest-gen') {
-    catchStops.sort((a, b) => (GAME_BY_ID.get(a.id)?.generation ?? 99) - (GAME_BY_ID.get(b.id)?.generation ?? 99));
+    catchStops.sort((a, b) => (GAME_BY_ID.get(groupOfId(a.id))?.generation ?? 99) - (GAME_BY_ID.get(groupOfId(b.id))?.generation ?? 99));
   }
 
   // Transfer prerequisites for the chosen games (Bank, chain intermediates).
   let needBank = false;
   const prereqGames = new Set<string>();
   for (const stop of catchStops) {
-    const info = transferFor(stop.id);
+    const info = transferFor(groupOfId(stop.id));
     if ((info.reach === 'bank' || info.reach === 'chain') && !hasBank) needBank = true;
     if (info.reach === 'chain') {
       for (const hop of info.requiresGames) {
         const rep = hop[0];
-        if (rep && !hop.some((g) => owned.has(g))) prereqGames.add(rep);
+        if (rep && !hop.some((g) => own.groups.has(g))) prereqGames.add(rep);
       }
     }
   }
 
   const steps: AcquireStep[] = [];
-  if (needBank) steps.push(stepFor(BANK_RELEASE_ID, [], owned, input.mode, true));
-  for (const g of prereqGames) steps.push(stepFor(g, [], owned, input.mode, true));
-  for (const stop of catchStops) steps.push(stepFor(stop.id, stop.entryKeys, owned, input.mode, false));
+  if (needBank) steps.push(stepFor(BANK_RELEASE_ID, [], own, input.mode, true));
+  for (const g of prereqGames) steps.push(stepFor(g, [], own, input.mode, true));
+  for (const stop of catchStops) steps.push(stepFor(stop.id, stop.entryKeys, own, input.mode, false));
 
   return {
     mode: input.mode,

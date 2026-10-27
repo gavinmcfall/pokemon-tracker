@@ -4,7 +4,7 @@ import type { EntryFilters, EntryWithStatus, GameOwnership, GameWithOwnership, S
 import { applicableMethods, parseOwnershipMethods } from './types.js';
 import { RELEASES, RELEASE_BY_ID } from './obtainability/games.js';
 import { TRANSFER_BY_GAME } from './obtainability/transfer.js';
-import { computePlan, computeAcquisitionPlan, hasBankFrom, ownedRouteGroups, ACQUIRE_MODES, ACQUIRE_RANKS, type AcquireMode, type AcquireRank } from './planner/compute.js';
+import { computePlan, computeAcquisitionPlan, hasBankFrom, ownedRouteGroups, ownedRouteReleases, ACQUIRE_MODES, ACQUIRE_RANKS, type AcquireMode, type AcquireRank } from './planner/compute.js';
 import { GENDER_PREFS, GOAL_SCOPES, parseGenderPref, parseGoalScope, scopeEntries } from './planner/scope.js';
 import { exportCsv, planImport } from './csv.js';
 import type { SpriteMirror } from './sprites.js';
@@ -288,6 +288,7 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
     const plan = computePlan({
       entries: scoped.entries,
       ownedRouteGroups: ownedRouteGroups(ownership),
+      ownedReleases: ownedRouteReleases(ownership),
       hasBank: hasBankFrom(ownership),
     });
     return c.json({ ...plan, scope, gender, ...(scoped.phase ? { phase: scoped.phase } : {}) });

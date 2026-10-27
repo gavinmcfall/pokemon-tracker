@@ -89,6 +89,46 @@ const FIXTURE: Record<string, string> = {
     }
   });
 
+  it('marks version exclusives from per-version wild encounters', async () => {
+    // Red/Blue: Ekans (23) wild only in Red, Arbok (24) evolves from it with no
+    // wild rows, Pidgey (16) wild in both.
+    const fx: Record<string, string> = {
+      version_groups: 'id,identifier\n1,red-blue\n',
+      versions: 'id,version_group_id,identifier\n1,1,red\n2,1,blue\n',
+      pokedexes: 'id,region_id,identifier,is_main_series\n2,1,kanto,1\n',
+      pokedex_version_groups: 'pokedex_id,version_group_id\n2,1\n',
+      pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n16,2,16\n23,2,23\n24,2,24\n',
+      pokemon_species:
+        'id,identifier,generation_id,has_gender_differences,evolves_from_species_id\n' +
+        '16,pidgey,1,0,\n23,ekans,1,0,\n24,arbok,1,0,23\n',
+      pokemon: 'id,species_id,identifier\n16,16,pidgey\n23,23,ekans\n24,24,arbok\n',
+      pokemon_forms: 'id,pokemon_id,identifier\n16,16,pidgey\n23,23,ekans\n24,24,arbok\n',
+      encounters: 'id,version_id,location_area_id,encounter_slot_id,pokemon_id\n1,1,10,20,23\n2,1,10,20,16\n3,2,10,20,16\n',
+      location_areas: 'id,location_id,identifier\n10,30,kanto-route-4-area\n',
+      locations: 'id,region_id,identifier\n30,1,kanto-route-4\n',
+      encounter_slots: 'id,version_group_id,encounter_method_id,slot,rarity\n20,1,1,1,50\n',
+      encounter_methods: 'id,identifier\n1,walk\n',
+      pokemon_evolution: 'id,evolved_species_id,evolution_trigger_id\n1,24,1\n',
+      evolution_triggers: 'id,identifier\n1,level-up\n',
+    };
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try {
+      await client.query('drop schema if exists pokeapi_vx cascade');
+      await client.query('create schema pokeapi_vx');
+      for (const [table, csv] of Object.entries(fx)) await loadCsv(client, 'pokeapi_vx', table, csv);
+
+      const byDex = await obtainabilityFromMirror(client, 'pokeapi_vx');
+      const rb = (dex: number) => byDex.get(dex)!.availability.find((a) => a.gameId === 'rb')!;
+      expect(rb(23).versions).toEqual(['red']);
+      expect(rb(24).versions).toEqual(['red']); // inherited from Ekans
+      expect(rb(16).versions).toBeUndefined();  // both cartridges
+    } finally {
+      await client.query('drop schema if exists pokeapi_vx cascade').catch(() => {});
+      await client.end();
+    }
+  });
+
   it('serebii supplement fills modern-game locations (gap-fill only, membership-gated)', async () => {
     const serebiiHtml = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'serebii', 'bulbasaur-locations.html'),

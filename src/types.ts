@@ -91,6 +91,9 @@ export interface AvailabilityEntry {
   /** Where to find it in this game (≤3, e.g. "Route 119 (super rod)"); mirror
    *  encounter data exists for Gen 1→SwSh — absent for newer games. */
   locations?: string[];
+  /** Version exclusive: only these cartridges (release ids, e.g. ['scarlet'])
+   *  can obtain it. Absent = every cartridge of the game. */
+  versions?: string[];
 }
 
 /** How a species is reached by evolution (from the mirror's evolution data). */

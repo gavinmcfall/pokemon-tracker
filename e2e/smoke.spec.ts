@@ -426,6 +426,41 @@ test('My Games: owning a game marks its availability and enables the "owned" fil
   await expect(page.locator('.games-panel button[data-game-id="lets-go-pikachu"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('version exclusives: owning Scarlet does not mark a Violet-only species as owned', async ({ page }) => {
+  // Make the harness's Hippopotas ♂ a Violet exclusive (the API would say
+  // `versions: ['violet']`); Turtwig stays catchable in both cartridges.
+  await page.route('**/api/entries', async (route) => {
+    const res = await route.fetch();
+    const entries = await res.json();
+    for (const e of entries) {
+      if (e.entryKey === '0449-default-male') e.obtainability.availability[0].versions = ['violet'];
+    }
+    await route.fulfill({ response: res, json: entries });
+  });
+  await page.reload();
+  await expect(page.locator(gridButton).first()).toBeVisible();
+
+  await openActions(page);
+  await page.locator('#games-btn').click();
+  const modal = page.locator('.games-panel');
+  await modal.locator('button[data-game-id="scarlet"][data-method="cartridge"]').click();
+  await expect(modal.locator('button[data-game-id="scarlet"][data-method="cartridge"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(modal).toHaveCount(0);
+
+  await page.locator('#search').fill('hippopotas');
+  await page.locator(`${gridButton}[data-entry-key="0449-default-male"] ~ .tile-info`).click();
+  const zone = page.locator('.sheet-section.obtain');
+  await expect(zone).toContainText('VIOLET ONLY');
+  await expect(zone).not.toContainText('✓ OWNED');
+  await page.keyboard.press('Escape');
+
+  await page.locator('#search').fill('turtwig');
+  await page.locator(`${gridButton}[data-entry-key="0387-default-male"] ~ .tile-info`).click();
+  await expect(page.locator('.sheet-section.obtain')).toContainText('✓ OWNED');
+  await expect(page.locator('.sheet-section.obtain')).not.toContainText('ONLY');
+});
+
 test('planner: verdicts + acquisitions, and owning a game flips a species to Ready', async ({ page }) => {
   // Harness obtainability: Charizard default → Let's Go (lgpe, HOME-native);
   // mega_x → Red/Blue (rb, via Bank); Vivillon is caught; Mewtwo has no data.
