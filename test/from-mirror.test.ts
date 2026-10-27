@@ -89,25 +89,27 @@ const FIXTURE: Record<string, string> = {
     }
   });
 
-  it('marks version exclusives from per-version wild encounters', async () => {
+  it('marks version exclusives and classifies gift encounters', async () => {
     // Red/Blue: Ekans (23) wild only in Red, Arbok (24) evolves from it with no
-    // wild rows, Pidgey (16) wild in both.
+    // wild rows, Pidgey (16) wild in both, Bulbasaur (1) a gift in both.
     const fx: Record<string, string> = {
       version_groups: 'id,identifier\n1,red-blue\n',
       versions: 'id,version_group_id,identifier\n1,1,red\n2,1,blue\n',
       pokedexes: 'id,region_id,identifier,is_main_series\n2,1,kanto,1\n',
       pokedex_version_groups: 'pokedex_id,version_group_id\n2,1\n',
-      pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n16,2,16\n23,2,23\n24,2,24\n',
+      pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n1,2,1\n16,2,16\n23,2,23\n24,2,24\n',
       pokemon_species:
         'id,identifier,generation_id,has_gender_differences,evolves_from_species_id\n' +
-        '16,pidgey,1,0,\n23,ekans,1,0,\n24,arbok,1,0,23\n',
-      pokemon: 'id,species_id,identifier\n16,16,pidgey\n23,23,ekans\n24,24,arbok\n',
-      pokemon_forms: 'id,pokemon_id,identifier\n16,16,pidgey\n23,23,ekans\n24,24,arbok\n',
-      encounters: 'id,version_id,location_area_id,encounter_slot_id,pokemon_id\n1,1,10,20,23\n2,1,10,20,16\n3,2,10,20,16\n',
-      location_areas: 'id,location_id,identifier\n10,30,kanto-route-4-area\n',
-      locations: 'id,region_id,identifier\n30,1,kanto-route-4\n',
-      encounter_slots: 'id,version_group_id,encounter_method_id,slot,rarity\n20,1,1,1,50\n',
-      encounter_methods: 'id,identifier\n1,walk\n',
+        '1,bulbasaur,1,0,\n16,pidgey,1,0,\n23,ekans,1,0,\n24,arbok,1,0,23\n',
+      pokemon: 'id,species_id,identifier\n1,1,bulbasaur\n16,16,pidgey\n23,23,ekans\n24,24,arbok\n',
+      pokemon_forms: 'id,pokemon_id,identifier\n1,1,bulbasaur\n16,16,pidgey\n23,23,ekans\n24,24,arbok\n',
+      encounters:
+        'id,version_id,location_area_id,encounter_slot_id,pokemon_id\n' +
+        '1,1,10,20,23\n2,1,10,20,16\n3,2,10,20,16\n4,1,11,21,1\n5,2,11,21,1\n',
+      location_areas: 'id,location_id,identifier\n10,30,kanto-route-4-area\n11,31,pallet-town-area\n',
+      locations: 'id,region_id,identifier\n30,1,kanto-route-4\n31,1,kanto-pallet-town\n',
+      encounter_slots: 'id,version_group_id,encounter_method_id,slot,rarity\n20,1,1,1,50\n21,1,18,1,100\n',
+      encounter_methods: 'id,identifier\n1,walk\n18,gift\n',
       pokemon_evolution: 'id,evolved_species_id,evolution_trigger_id\n1,24,1\n',
       evolution_triggers: 'id,identifier\n1,level-up\n',
     };
@@ -123,6 +125,9 @@ const FIXTURE: Record<string, string> = {
       expect(rb(23).versions).toEqual(['red']);
       expect(rb(24).versions).toEqual(['red']); // inherited from Ekans
       expect(rb(16).versions).toBeUndefined();  // both cartridges
+      // A gift encounter is a gift, not "wild — Pallet Town (gift)".
+      expect(rb(1)).toMatchObject({ method: 'gift', locations: ['Pallet Town'] });
+      expect(rb(16)).toMatchObject({ method: 'wild', locations: ['Route 4'] });
     } finally {
       await client.query('drop schema if exists pokeapi_vx cascade').catch(() => {});
       await client.end();

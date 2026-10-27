@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { EntryWithStatus, GameOwnership, Obtainability } from '../src/types.js';
 import { RELEASES_BY_GROUP, releaseForVersion } from '../src/obtainability/games.js';
 import { addEvidence, emptyEvidence, versionRestriction, type RestrictionContext } from '../src/obtainability/versions.js';
-import { computeObtainabilityFromSources } from '../src/obtainability/compute.js';
+import { computeObtainabilityFromSources, mostDirect } from '../src/obtainability/compute.js';
+import { encounterClass } from '../src/obtainability/from-mirror.js';
 import { computeAcquisitionPlan, computePlan, ownedRouteGroups, ownedRouteReleases } from '../src/planner/compute.js';
 
 describe('releases per group + DLC version folding', () => {
@@ -170,5 +171,23 @@ describe('itinerary — version exclusives', () => {
     expect(s.map((x) => [x.id, x.owned, x.entryKeys.length])).toEqual(
       expect.arrayContaining([['sv', true, 1], ['violet', true, 1], ['scarlet', true, 1]]),
     );
+  });
+});
+
+describe('encounter method classes', () => {
+  it('maps PokéAPI encounter methods to how you obtain it', () => {
+    expect(encounterClass('walk')).toBe('wild');
+    expect(encounterClass('max-raid')).toBe('wild');
+    expect(encounterClass('gift')).toBe('gift');
+    expect(encounterClass('gift-egg')).toBe('gift');
+    expect(encounterClass('npc-trade')).toBe('trade');
+    expect(encounterClass('pokeflute')).toBe('static');
+    expect(encounterClass('roaming-grass')).toBe('roaming');
+  });
+
+  it('the most direct method wins', () => {
+    expect(mostDirect(['gift', 'wild'])).toBe('wild');
+    expect(mostDirect(['trade', 'gift'])).toBe('gift');
+    expect(mostDirect([])).toBe('available');
   });
 });
