@@ -322,8 +322,21 @@ Version-group→game rollup lives in `src/obtainability/games.ts`
 (`VERSION_GROUP_TO_GAME`; DLC folds into its base game — including Legends: Z-A's
 `legends-za` + `mega-dimension` (Mega Dimension DLC) → `za`; GameCube/JP/
 unreleased groups are unmapped → "unknown"). Known limits (documented, not
-fabricated): obtainability is species-level (pokédex membership can't split
-Alolan vs Kantonian Raichu — regional-form exclusivity is future work).
+fabricated): pokédex membership is species-level, so it can't split Alolan
+vs Kantonian Raichu on its own.
+
+**Regional forms** (Alolan / Galarian / Hisuian / Paldean) get their own record
+(`obtainabilityWithFormsFromMirror` → `byForm`, keyed `${dex}:${formSlug}`, also
+covering the species' default form), from what the data proves: a form is never
+listed in a game released before it was introduced (`pokemon_forms.
+introduced_in_version_group_id` — no Alolan Vulpix in Red/Blue), and where the
+mirror has encounter rows per form (Gen 7 → SwSh, Let's Go included) each form
+gets only its own method, locations and version exclusives (Vulpix in Sun/Moon
+is the Alolan one; Galarian Ponyta is Shield-only, inherited by Galarian
+Rapidash via its same-region pre-evolution). Games with no per-form data (BDSP,
+PLA, SV, Z-A) stay species-level, so a regional form can still be over-claimed
+there (e.g. Galarian forms in BDSP/PLA, where they don't exist) — closing that
+needs a cited per-game table, not a guess.
 
 **Version exclusives** (`src/obtainability/versions.ts`). Dex membership is per
 version group, so it can't tell Scarlet from Violet; per-cartridge catch

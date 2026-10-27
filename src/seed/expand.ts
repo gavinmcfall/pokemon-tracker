@@ -35,6 +35,12 @@ export function includedVarieties(species: RawSpecies, tier: SeedTier): { name: 
     .map((v) => ({ name: v.pokemon.name, isDefault: v.is_default }));
 }
 
+/** The entry formSlug a non-default variety becomes (`vulpix-alola` → `alola`). */
+export function varietyFormSlug(varietyName: string, speciesName: string): string {
+  const split = splitGenderSegment(stripPrefix(varietyName, speciesName).split('-'));
+  return split.parts.length === 0 ? 'default' : toSlug(split.parts.join('-'));
+}
+
 /**
  * Which pokemon-forms the runner must fetch for a variety:
  * every sibling form when the pokemon has several (cosmetic expansion, tier ≥
@@ -140,9 +146,8 @@ export function expandSpecies(bundle: SpeciesBundle, tier: SeedTier): Entry[] {
         genderOverride = splitGenderSegment(parts).gender;
       }
     } else {
-      const split = splitGenderSegment(stripPrefix(pokemon.name, species.name).split('-'));
-      genderOverride = split.gender;
-      formSlug = split.parts.length === 0 ? 'default' : toSlug(split.parts.join('-'));
+      genderOverride = splitGenderSegment(stripPrefix(pokemon.name, species.name).split('-')).gender;
+      formSlug = varietyFormSlug(pokemon.name, species.name);
     }
 
     const siblingForms = pokemon.forms

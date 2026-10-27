@@ -37,7 +37,7 @@ describe('versionRestriction', () => {
     const members = new Set(['246:sv', '247:sv', '248:sv', '198:sv', '430:sv', '300:sv', '301:sv', '25:rb']);
     return {
       evidence: ev,
-      evolvesFrom: (dex) => pre[dex] ?? null,
+      evolvesFrom: (dex) => pre[Number(dex)] ?? null,
       inGame: (dex, gameId) => members.has(`${dex}:${gameId}`),
     };
   }

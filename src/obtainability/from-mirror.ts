@@ -1,9 +1,10 @@
 import type pg from 'pg';
 import type { EvolveFrom, Obtainability } from '../types.js';
-import { RELEASE_BY_ID, VERSION_GROUP_TO_GAME, releaseForVersion } from './games.js';
+import { RELEASE_BY_ID, VERSION_GROUP_TO_GAME, byReleaseOrder, releaseForVersion } from './games.js';
 import { computeObtainabilityFromSources, mostDirect, type ObtainMethod, type ObtainSource } from './compute.js';
 import { AVAILABILITY_EXCLUSIONS, STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
-import { addEvidence, emptyEvidence, versionRestriction } from './versions.js';
+import { addEvidence, emptyEvidence, versionRestriction, type RestrictionContext, type Subject } from './versions.js';
+import { varietyFormSlug } from '../seed/expand.js';
 
 /** "kanto-route-25" → "Route 25"; "old-rod" → "old rod". */
 const REGION_PREFIX = /^(kanto|johto|hoenn|sinnoh|sinnoh-pt|unova|unova-b2w2|kalos|alola|galar|hisui|paldea)-/;
@@ -37,6 +38,41 @@ export const encounterClass = (method: string): ObtainMethod => ENCOUNTER_CLASS[
  * "no obtainability this run" (best-effort; run the mirror job first).
  */
 export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'pokeapi'): Promise<Map<number, Obtainability>> {
+  return (await obtainabilityWithFormsFromMirror(client, schema)).byDex;
+}
+
+/** One summarized encounter list: the most direct method, and its locations. */
+function summarizeEncounters(encs: { loc: string; method: string }[]): { method: ObtainMethod; locations: string[] } {
+  const method = mostDirect(encs.map((x) => encounterClass(x.method))) as ObtainMethod;
+  // Locations of the chosen method first, without a suffix that just repeats
+  // it ("gift — Pallet Town", not "Pallet Town (gift)"); the rest keep theirs.
+  const locations: string[] = [];
+  const add = (pretty: string) => { if (!locations.includes(pretty)) locations.push(pretty); };
+  for (const x of encs) {
+    if (encounterClass(x.method) === method) add(prettyLocation(x.loc, method === 'wild' ? x.method : 'walk'));
+  }
+  for (const x of encs) if (encounterClass(x.method) !== method) add(prettyLocation(x.loc, x.method));
+  return { method, locations };
+}
+
+const REGIONAL_VARIETY = '-(alola|galar|hisui|paldea)(-|$)';
+
+/**
+ * Species-level obtainability (`byDex`) plus per-form obtainability for
+ * regional forms (`byForm`, keyed `${dex}:${formSlug}`, including the species'
+ * default form). Regional forms differ from their species in two provable ways:
+ *
+ * - a form can't be in a game released before it was introduced (no Alolan
+ *   Vulpix in Red/Blue);
+ * - where the mirror has encounter rows per form (Gen 7 → SwSh), each form
+ *   gets only its own rows — Vulpix in Sun/Moon is the Alolan one.
+ *
+ * Games with no per-form data (SV, Z-A…) stay species-level.
+ */
+export async function obtainabilityWithFormsFromMirror(
+  client: pg.ClientBase,
+  schema = 'pokeapi',
+): Promise<{ byDex: Map<number, Obtainability>; byForm: Map<string, Obtainability> }> {
   const q = (name: string) => `"${schema.replaceAll('"', '""')}"."${name}"`;
 
   const meta = await client.query<{ id: string; generation_id: string; has_gender_differences: string; has_gmax: boolean }>(
@@ -74,9 +110,9 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
   // Where each species is wild-encounterable, per version-group: distinct
   // location + encounter-method pairs (mirror has this for Gen 1→SwSh; the
   // newest games ship no encounter rows, so their entries just omit locations).
-  const encounterLocs = await client.query<{ species_id: string; version_group: string; loc: string; method: string }>(
+  const encounterLocs = await client.query<{ species_id: string; version_group: string; loc: string; method: string; pokemon_id: string }>(
     `select distinct p.species_id, vg.identifier as version_group,
-            l.identifier as loc, coalesce(em.identifier, 'walk') as method
+            l.identifier as loc, coalesce(em.identifier, 'walk') as method, p.id as pokemon_id
      from ${q('encounters')} e
      join ${q('versions')} v on v.id = e.version_id
      join ${q('version_groups')} vg on vg.id = v.version_group_id
@@ -88,26 +124,24 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
      order by 1, 2, 3, 4`,
   );
   const encountersByKey = new Map<string, { loc: string; method: string }[]>(); // `${dex}:${gameId}`
+  const encountersByVariety = new Map<string, { loc: string; method: string }[]>(); // `${pokemonId}:${gameId}`
+  const pushEnc = (map: Map<string, { loc: string; method: string }[]>, key: string, enc: { loc: string; method: string }) => {
+    const arr = map.get(key) ?? map.set(key, []).get(key)!;
+    if (!arr.some((x) => x.loc === enc.loc && x.method === enc.method)) arr.push(enc);
+  };
   for (const row of encounterLocs.rows) {
     const gameId = VERSION_GROUP_TO_GAME[row.version_group];
     if (!gameId) continue;
-    const key = `${row.species_id}:${gameId}`;
-    (encountersByKey.get(key) ?? encountersByKey.set(key, []).get(key)!).push({ loc: row.loc, method: row.method });
+    const enc = { loc: row.loc, method: row.method };
+    pushEnc(encountersByKey, `${row.species_id}:${gameId}`, enc);
+    pushEnc(encountersByVariety, `${row.pokemon_id}:${gameId}`, enc);
   }
   const locsByKey = new Map<string, string[]>(); // `${dex}:${gameId}` -> pretty locations
   const encounterMethodByKey = new Map<string, ObtainMethod>(); // most direct encounter class
   for (const [key, encs] of encountersByKey) {
-    const method = mostDirect(encs.map((x) => encounterClass(x.method))) as ObtainMethod;
+    const { method, locations } = summarizeEncounters(encs);
     encounterMethodByKey.set(key, method);
-    // Locations of the chosen method first, without a suffix that just repeats
-    // it ("gift — Pallet Town", not "Pallet Town (gift)"); the rest keep theirs.
-    const arr: string[] = [];
-    const add = (pretty: string) => { if (!arr.includes(pretty)) arr.push(pretty); };
-    for (const x of encs) {
-      if (encounterClass(x.method) === method) add(prettyLocation(x.loc, method === 'wild' ? x.method : 'walk'));
-    }
-    for (const x of encs) if (encounterClass(x.method) !== method) add(prettyLocation(x.loc, x.method));
-    locsByKey.set(key, arr);
+    locsByKey.set(key, locations);
   }
 
   // Serebii supplement (see src/supplement/): locations for the games PokéAPI
@@ -137,8 +171,9 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
   } catch { /* supplement schema not present — nothing to merge */ }
 
   // Which cartridges each species is wild in (DLC versions fold into theirs).
-  const wildVersions = await client.query<{ species_id: string; version: string }>(
-    `select distinct p.species_id, v.identifier as version
+  // Per form too (subject `p<pokemon id>`), for regional forms' own exclusives.
+  const wildVersions = await client.query<{ species_id: string; version: string; pokemon_id: string }>(
+    `select distinct p.species_id, v.identifier as version, p.id as pokemon_id
      from ${q('encounters')} e
      join ${q('versions')} v on v.id = e.version_id
      join ${q('pokemon')} p on p.id = e.pokemon_id`,
@@ -146,7 +181,9 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
   for (const row of wildVersions.rows) {
     const releaseId = releaseForVersion(row.version);
     const release = releaseId ? RELEASE_BY_ID.get(releaseId) : undefined;
-    if (release) addEvidence(evidence, Number(row.species_id), release.versionGroup, release.releaseId);
+    if (!release) continue;
+    addEvidence(evidence, Number(row.species_id), release.versionGroup, release.releaseId);
+    addEvidence(evidence, `p${row.pokemon_id}`, release.versionGroup, release.releaseId);
   }
 
   // How each species is reached by evolution: its pre-evolution, and whether
@@ -179,43 +216,122 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
     .map((row) => ({ row, dex: Number(row.species_id), gameId: VERSION_GROUP_TO_GAME[row.version_group] }))
     .filter((m): m is typeof m & { gameId: string } => Boolean(m.gameId) && !AVAILABILITY_EXCLUSIONS[m.dex]?.includes(m.gameId!));
   const inGame = new Set(members.map((m) => `${m.dex}:${m.gameId}`));
-  const ctx = {
+  const membersByDex = new Map<number, typeof members>();
+  for (const m of members) (membersByDex.get(m.dex) ?? membersByDex.set(m.dex, []).get(m.dex)!).push(m);
+
+  // Regional forms + their species' default form (best-effort: a mirror without
+  // form metadata just means species-level obtainability for every form).
+  interface Variety { pokemonId: string; dex: number; formSlug: string; suffix: string; introGame: string | null }
+  const varieties: Variety[] = [];
+  try {
+    const rows = await client.query<{ pokemon_id: string; species_id: string; identifier: string; species: string; is_default: string; intro_vg: string | null }>(
+      `select p.id as pokemon_id, p.species_id, p.identifier, s.identifier as species, p.is_default,
+              vg.identifier as intro_vg
+       from ${q('pokemon')} p
+       join ${q('pokemon_species')} s on s.id = p.species_id
+       left join ${q('pokemon_forms')} f on f.pokemon_id = p.id and f.is_default = '1'
+       left join ${q('version_groups')} vg on vg.id = f.introduced_in_version_group_id
+       where p.species_id in (select species_id from ${q('pokemon')} where identifier ~ '${REGIONAL_VARIETY}')
+         and (p.is_default = '1' or p.identifier ~ '${REGIONAL_VARIETY}')`,
+    );
+    for (const r of rows.rows) {
+      const isDefault = r.is_default === '1';
+      const formSlug = isDefault ? 'default' : varietyFormSlug(r.identifier, r.species);
+      varieties.push({
+        pokemonId: r.pokemon_id,
+        dex: Number(r.species_id),
+        formSlug,
+        suffix: isDefault ? '' : formSlug.split('_')[0]!, // 'alola', 'galar', …
+        introGame: isDefault || !r.intro_vg ? null : (VERSION_GROUP_TO_GAME[r.intro_vg] ?? null),
+      });
+    }
+  } catch { /* mirror without form metadata — species-level only */ }
+  const varietyBySuffix = new Map(varieties.map((v) => [`${v.dex}:${v.suffix}`, v]));
+  const varietyByPid = new Map(varieties.map((v) => [v.pokemonId, v]));
+  // A form isn't in games released before it was introduced.
+  const formInGame = (v: Variety, gameId: string) => !v.introGame || byReleaseOrder(gameId, v.introGame) >= 0;
+
+  // Subjects are species (dex) or forms (`p<pokemon id>`). A form evolves from
+  // its pre-evolution's same-region form when there is one (Galarian Rapidash ←
+  // Galarian Ponyta), else from the species.
+  const variety = (s: Subject) => (typeof s === 'string' ? varietyByPid.get(s.slice(1)) : undefined);
+  const ctx: RestrictionContext = {
     evidence,
-    evolvesFrom: (dex: number) => evolveFromByDex.get(dex)?.dex ?? null,
-    inGame: (dex: number, gameId: string) => inGame.has(`${dex}:${gameId}`),
+    evolvesFrom: (s) => {
+      const v = variety(s);
+      const preDex = evolveFromByDex.get(v ? v.dex : Number(s))?.dex;
+      if (preDex === undefined) return null;
+      const preVariety = v ? varietyBySuffix.get(`${preDex}:${v.suffix}`) : undefined;
+      return preVariety ? `p${preVariety.pokemonId}` : preDex;
+    },
+    inGame: (s, gameId) => {
+      const v = variety(s);
+      return v ? inGame.has(`${v.dex}:${gameId}`) && formInGame(v, gameId) : inGame.has(`${s}:${gameId}`);
+    },
   };
-  for (const { row, dex, gameId } of members) {
+
+  /** One game's source for a species (`form` absent) or one of its forms. */
+  const sourceFor = (row: (typeof members)[number]['row'], dex: number, gameId: string, form?: Variety): ObtainSource => {
     const key = `${dex}:${gameId}`;
+    // Per-form encounter rows exist for this game: use only this form's.
+    if (form && encountersByKey.has(key)) {
+      const own = encountersByVariety.get(`${form.pokemonId}:${gameId}`);
+      const sum = own ? summarizeEncounters(own) : null;
+      const versions = versionRestriction(`p${form.pokemonId}`, gameId, ctx);
+      return {
+        gameId, method: sum?.method ?? 'available',
+        ...(sum ? { locations: sum.locations } : {}),
+        ...(versions ? { versions } : {}),
+      };
+    }
     const locations = locsByKey.get(key) ?? supByKey.get(key);
     const versions = versionRestriction(dex, gameId, ctx);
     // Encounter rows say how (wild / gift / trade / static / roaming); a dex
     // member with no rows is just `available`.
     const method = encounterMethodByKey.get(key) ?? (row.wild ? 'wild' : 'available');
-    push(dex, {
+    return {
       gameId, method,
       ...(locations ? { locations } : {}),
       ...(versions ? { versions } : {}),
-    });
-  }
+    };
+  };
+
   // Curated static/gift as a supplement, for the rare mon a regional dex omits.
-  for (const [dexStr, entries] of Object.entries(STATIC_AVAILABILITY)) {
-    for (const e of entries) push(Number(dexStr), { gameId: e.gameId, method: e.method });
-  }
-  for (const [dexStr, gameIds] of Object.entries(STARTER_GIFTS)) {
-    for (const gameId of gameIds) push(Number(dexStr), { gameId, method: 'gift' });
+  const curated = (dex: number): ObtainSource[] => [
+    ...(STATIC_AVAILABILITY[dex] ?? []).map((e): ObtainSource => ({ gameId: e.gameId, method: e.method })),
+    ...(STARTER_GIFTS[dex] ?? []).map((gameId): ObtainSource => ({ gameId, method: 'gift' })),
+  ];
+
+  for (const { row, dex, gameId } of members) push(dex, sourceFor(row, dex, gameId));
+  for (const dexStr of new Set([...Object.keys(STATIC_AVAILABILITY), ...Object.keys(STARTER_GIFTS)])) {
+    for (const s of curated(Number(dexStr))) push(Number(dexStr), s);
   }
 
-  const out = new Map<number, Obtainability>();
-  for (const m of meta.rows) {
-    const dex = Number(m.id);
-    out.set(dex, computeObtainabilityFromSources({
+  const metaByDex = new Map(meta.rows.map((m) => [Number(m.id), m]));
+  const build = (dex: number, sources: ObtainSource[]): Obtainability => {
+    const m = metaByDex.get(dex)!;
+    return computeObtainabilityFromSources({
       dex,
       generation: Number(m.generation_id),
       hasGenderDifferences: m.has_gender_differences === '1',
       hasGmaxVariety: m.has_gmax,
-      sources: sourcesByDex.get(dex) ?? [],
+      sources,
       evolveFrom: evolveFromByDex.get(dex) ?? null,
-    }));
+    });
+  };
+
+  const byDex = new Map<number, Obtainability>();
+  for (const dex of metaByDex.keys()) byDex.set(dex, build(dex, sourcesByDex.get(dex) ?? []));
+
+  const byForm = new Map<string, Obtainability>();
+  for (const v of varieties) {
+    if (!metaByDex.has(v.dex)) continue;
+    const sources: ObtainSource[] = [];
+    for (const { row, gameId } of membersByDex.get(v.dex) ?? []) {
+      if (formInGame(v, gameId)) sources.push(sourceFor(row, v.dex, gameId, v));
+    }
+    for (const s of curated(v.dex)) if (formInGame(v, s.gameId)) sources.push(s);
+    byForm.set(`${v.dex}:${v.formSlug}`, build(v.dex, sources));
   }
-  return out;
+  return { byDex, byForm };
 }
