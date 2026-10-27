@@ -4,7 +4,7 @@ import { parseSeedTier } from '../types.js';
 import type { Entry, Obtainability } from '../types.js';
 import { PokeApiClient, mapLimit, type RawForm, type RawPokemon } from './pokeapi.js';
 import { expandSpecies, includedVarieties, neededForms } from './expand.js';
-import { obtainabilityFromMirror } from '../obtainability/from-mirror.js';
+import { obtainabilityWithFormsFromMirror } from '../obtainability/from-mirror.js';
 
 /**
  * Seed job (spec §5): idempotent upsert of the full entry catalogue from
@@ -76,9 +76,10 @@ async function main(): Promise<void> {
   const mirrorClient = new pg.Client({ connectionString: databaseUrl });
   await mirrorClient.connect();
   try {
-    const byDex = await obtainabilityFromMirror(mirrorClient, mirrorSchema);
+    // Regional forms get their own record (byForm); everything else the species'.
+    const { byDex, byForm } = await obtainabilityWithFormsFromMirror(mirrorClient, mirrorSchema);
     obtainabilityRecords = entries
-      .map((e) => ({ entryKey: e.entryKey, obtainability: byDex.get(e.dex) }))
+      .map((e) => ({ entryKey: e.entryKey, obtainability: byForm.get(`${e.dex}:${e.formSlug}`) ?? byDex.get(e.dex) }))
       .filter((r): r is { entryKey: string; obtainability: Obtainability } => r.obtainability !== undefined);
     console.log(`seed: obtainability sourced from mirror (${mirrorSchema}) for ${byDex.size} species`);
   } catch (err) {

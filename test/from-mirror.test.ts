@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { loadCsv } from '../src/mirror/load.js';
-import { obtainabilityFromMirror } from '../src/obtainability/from-mirror.js';
+import { obtainabilityFromMirror, obtainabilityWithFormsFromMirror } from '../src/obtainability/from-mirror.js';
+import type { Obtainability } from '../src/types.js';
 import { runSupplement } from '../src/supplement/run.js';
 
 const url = process.env.TEST_DATABASE_URL;
@@ -130,6 +131,59 @@ const FIXTURE: Record<string, string> = {
       expect(rb(16)).toMatchObject({ method: 'wild', locations: ['Route 4'] });
     } finally {
       await client.query('drop schema if exists pokeapi_vx cascade').catch(() => {});
+      await client.end();
+    }
+  });
+
+  it('gives regional forms their own games, rows and exclusives', async () => {
+    // Vulpix (37) wild in Red; Alolan Vulpix (10103, introduced in Sun/Moon)
+    // wild only in Sun. Pidgey's Moon row just proves Moon has encounter data.
+    const fx: Record<string, string> = {
+      version_groups: 'id,identifier\n1,red-blue\n17,sun-moon\n',
+      versions: 'id,version_group_id,identifier\n1,1,red\n2,1,blue\n27,17,sun\n28,17,moon\n',
+      pokedexes: 'id,region_id,identifier,is_main_series\n2,1,kanto,1\n16,7,original-alola,1\n',
+      pokedex_version_groups: 'pokedex_id,version_group_id\n2,1\n16,17\n',
+      pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n37,2,37\n37,16,40\n',
+      pokemon_species:
+        'id,identifier,generation_id,has_gender_differences,evolves_from_species_id\n' +
+        '37,vulpix,1,0,\n16,pidgey,1,0,\n',
+      pokemon: 'id,species_id,identifier,is_default\n37,37,vulpix,1\n10103,37,vulpix-alola,0\n16,16,pidgey,1\n',
+      pokemon_forms:
+        'id,pokemon_id,identifier,is_default,introduced_in_version_group_id\n' +
+        '37,37,vulpix,1,1\n10123,10103,vulpix-alola,1,17\n16,16,pidgey,1,1\n',
+      encounters:
+        'id,version_id,location_area_id,encounter_slot_id,pokemon_id\n' +
+        '1,1,10,20,37\n2,2,10,20,37\n3,27,11,21,10103\n4,28,11,21,16\n',
+      location_areas: 'id,location_id,identifier\n10,30,kanto-route-7-area\n11,31,alola-route-14-area\n',
+      locations: 'id,region_id,identifier\n30,1,kanto-route-7\n31,7,alola-route-14\n',
+      encounter_slots: 'id,version_group_id,encounter_method_id,slot,rarity\n20,1,1,1,50\n21,17,1,1,50\n',
+      encounter_methods: 'id,identifier\n1,walk\n',
+      pokemon_evolution: 'id,evolved_species_id,evolution_trigger_id\n',
+      evolution_triggers: 'id,identifier\n1,level-up\n',
+    };
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try {
+      await client.query('drop schema if exists pokeapi_rf cascade');
+      await client.query('create schema pokeapi_rf');
+      for (const [table, csv] of Object.entries(fx)) await loadCsv(client, 'pokeapi_rf', table, csv);
+
+      const { byDex, byForm } = await obtainabilityWithFormsFromMirror(client, 'pokeapi_rf');
+      const games = (ob: Obtainability | undefined) => Object.fromEntries((ob?.availability ?? []).map((a) => [a.gameId, a]));
+
+      const alolan = games(byForm.get('37:alola'));
+      expect(alolan.rb).toBeUndefined(); // introduced in Sun/Moon
+      expect(alolan.sm).toMatchObject({ method: 'wild', versions: ['sun'], locations: ['Route 14'] });
+
+      const kanto = games(byForm.get('37:default'));
+      expect(kanto.rb).toMatchObject({ method: 'wild', locations: ['Route 7'] });
+      expect(kanto.sm).toMatchObject({ method: 'available' }); // the Alolan form's rows aren't its own
+      expect(kanto.sm?.locations).toBeUndefined();
+
+      // Species-level record is unchanged (other forms fall back to it).
+      expect(games(byDex.get(37)).sm).toMatchObject({ method: 'wild' });
+    } finally {
+      await client.query('drop schema if exists pokeapi_rf cascade').catch(() => {});
       await client.end();
     }
   });
