@@ -39,6 +39,10 @@ function rank(method: string): number {
 function moreDirect(a: string, b: string): string {
   return rank(a) <= rank(b) ? a : b;
 }
+/** The most direct of several methods (`available` if none). */
+export function mostDirect(methods: string[]): string {
+  return methods.reduce<string>((best, m) => moreDirect(best, m), 'available');
+}
 
 /** Names of every species strictly upstream of `target` on its evolution path (root → target). */
 export function chainAncestors(chain: RawChainLink, target: string): string[] {

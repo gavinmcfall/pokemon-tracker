@@ -1,7 +1,7 @@
 import type pg from 'pg';
 import type { EvolveFrom, Obtainability } from '../types.js';
 import { RELEASE_BY_ID, VERSION_GROUP_TO_GAME, releaseForVersion } from './games.js';
-import { computeObtainabilityFromSources, type ObtainSource } from './compute.js';
+import { computeObtainabilityFromSources, mostDirect, type ObtainMethod, type ObtainSource } from './compute.js';
 import { AVAILABILITY_EXCLUSIONS, STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
 import { addEvidence, emptyEvidence, versionRestriction } from './versions.js';
 
@@ -12,6 +12,18 @@ export function prettyLocation(identifier: string, method: string): string {
   const words = stripped.split('-').map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w)).join(' ');
   return method && method !== 'walk' ? `${words} (${method.replaceAll('-', ' ')})` : words;
 }
+
+/**
+ * PokéAPI encounter methods that aren't a wild catch. Everything else (walk,
+ * fishing, surf, headbutt, raids, overworld…) is `wild`.
+ */
+const ENCOUNTER_CLASS: Record<string, ObtainMethod> = {
+  gift: 'gift', 'gift-egg': 'gift',
+  'npc-trade': 'trade',
+  static: 'static', pokeflute: 'static', 'squirt-bottle': 'static', 'wailmer-pail': 'static', 'devon-scope': 'static',
+  'roaming-grass': 'roaming', 'roaming-water': 'roaming',
+};
+export const encounterClass = (method: string): ObtainMethod => ENCOUNTER_CLASS[method] ?? 'wild';
 
 /**
  * Source obtainability for every species from the local PokéAPI mirror, keyed by
@@ -75,14 +87,26 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
      left join ${q('encounter_methods')} em on em.id = es.encounter_method_id
      order by 1, 2, 3, 4`,
   );
-  const locsByKey = new Map<string, string[]>(); // `${dex}:${gameId}` -> pretty locations
+  const encountersByKey = new Map<string, { loc: string; method: string }[]>(); // `${dex}:${gameId}`
   for (const row of encounterLocs.rows) {
     const gameId = VERSION_GROUP_TO_GAME[row.version_group];
     if (!gameId) continue;
     const key = `${row.species_id}:${gameId}`;
-    const arr = locsByKey.get(key) ?? [];
-    const pretty = prettyLocation(row.loc, row.method);
-    if (!arr.includes(pretty)) arr.push(pretty);
+    (encountersByKey.get(key) ?? encountersByKey.set(key, []).get(key)!).push({ loc: row.loc, method: row.method });
+  }
+  const locsByKey = new Map<string, string[]>(); // `${dex}:${gameId}` -> pretty locations
+  const encounterMethodByKey = new Map<string, ObtainMethod>(); // most direct encounter class
+  for (const [key, encs] of encountersByKey) {
+    const method = mostDirect(encs.map((x) => encounterClass(x.method))) as ObtainMethod;
+    encounterMethodByKey.set(key, method);
+    // Locations of the chosen method first, without a suffix that just repeats
+    // it ("gift — Pallet Town", not "Pallet Town (gift)"); the rest keep theirs.
+    const arr: string[] = [];
+    const add = (pretty: string) => { if (!arr.includes(pretty)) arr.push(pretty); };
+    for (const x of encs) {
+      if (encounterClass(x.method) === method) add(prettyLocation(x.loc, method === 'wild' ? x.method : 'walk'));
+    }
+    for (const x of encs) if (encounterClass(x.method) !== method) add(prettyLocation(x.loc, x.method));
     locsByKey.set(key, arr);
   }
 
@@ -164,8 +188,11 @@ export async function obtainabilityFromMirror(client: pg.ClientBase, schema = 'p
     const key = `${dex}:${gameId}`;
     const locations = locsByKey.get(key) ?? supByKey.get(key);
     const versions = versionRestriction(dex, gameId, ctx);
+    // Encounter rows say how (wild / gift / trade / static / roaming); a dex
+    // member with no rows is just `available`.
+    const method = encounterMethodByKey.get(key) ?? (row.wild ? 'wild' : 'available');
     push(dex, {
-      gameId, method: row.wild ? 'wild' : 'available',
+      gameId, method,
       ...(locations ? { locations } : {}),
       ...(versions ? { versions } : {}),
     });
