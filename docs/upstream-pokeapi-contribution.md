@@ -5,6 +5,18 @@
 **Prereq reading:** [PokéAPI Gen 9 discussion #769](https://github.com/PokeAPI/pokeapi/discussions/769),
 [community contribution design doc](https://gist.github.com/DJ-Meyers/23f89af0889e8950f5dd78935b99516e).
 
+## Upstream state (checked 2026-10-28)
+
+- Discussion #769 ("Generation 9 data") has a single maintainer reply, from
+  2022-11: no data team, contributions welcome. Nothing has claimed the
+  modern-game encounter slice since.
+- No open or recent PRs add BDSP / PLA / SV / Z-A encounters. The repo is
+  active, but the recent data work is older games (BW1 trades #1696, Gen 4
+  trades #1640, FRLG trades #1638, ORAS surfing/fishing #1542 still open).
+- So phase 1 below (comment on #769 before writing code) is still the right
+  first step, and the slice looks free. It needs Gavin's account; nothing has
+  been posted.
+
 ## Why
 
 PokéAPI has **no encounter data** for BDSP, Legends: Arceus, Scarlet/Violet or
