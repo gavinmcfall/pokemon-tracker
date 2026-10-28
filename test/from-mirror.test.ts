@@ -188,6 +188,56 @@ const FIXTURE: Record<string, string> = {
     }
   });
 
+  it('uses the curated table for regional forms in species-level games', async () => {
+    // Growlithe (58) in the Hisui dex, Vulpix (37) in the Blueberry dex. No
+    // encounter rows: these games only have dex membership in the mirror.
+    const fx: Record<string, string> = {
+      version_groups: 'id,identifier\n24,legends-arceus\n25,scarlet-violet\n27,the-indigo-disk\n',
+      versions: 'id,version_group_id,identifier\n39,24,legends-arceus\n40,25,scarlet\n41,25,violet\n',
+      pokedexes: 'id,region_id,identifier,is_main_series\n30,9,hisui,1\n33,10,blueberry,1\n',
+      pokedex_version_groups: 'pokedex_id,version_group_id\n30,24\n33,27\n',
+      pokemon_dex_numbers: 'species_id,pokedex_id,pokedex_number\n58,30,57\n37,33,157\n',
+      pokemon_species:
+        'id,identifier,generation_id,has_gender_differences,evolves_from_species_id\n' +
+        '58,growlithe,1,0,\n37,vulpix,1,0,\n',
+      pokemon:
+        'id,species_id,identifier,is_default\n58,58,growlithe,1\n10229,58,growlithe-hisui,0\n' +
+        '37,37,vulpix,1\n10103,37,vulpix-alola,0\n',
+      pokemon_forms:
+        'id,pokemon_id,identifier,is_default,introduced_in_version_group_id\n' +
+        '58,58,growlithe,1,\n10229,10229,growlithe-hisui,1,24\n37,37,vulpix,1,\n10123,10103,vulpix-alola,1,\n',
+      encounters: 'id,version_id,location_area_id,encounter_slot_id,pokemon_id\n',
+      location_areas: 'id,location_id,identifier\n',
+      locations: 'id,region_id,identifier\n',
+      encounter_slots: 'id,version_group_id,encounter_method_id,slot,rarity\n',
+      encounter_methods: 'id,identifier\n1,walk\n',
+      pokemon_evolution: 'id,evolved_species_id,evolution_trigger_id\n',
+      evolution_triggers: 'id,identifier\n1,level-up\n',
+    };
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try {
+      await client.query('drop schema if exists pokeapi_cf cascade');
+      await client.query('create schema pokeapi_cf');
+      for (const [table, csv] of Object.entries(fx)) await loadCsv(client, 'pokeapi_cf', table, csv);
+
+      const { byDex, byForm } = await obtainabilityWithFormsFromMirror(client, 'pokeapi_cf');
+      const games = (ob: Obtainability | undefined) => Object.fromEntries((ob?.availability ?? []).map((a) => [a.gameId, a]));
+
+      expect(games(byForm.get('58:hisui')).pla).toBeDefined();
+      expect(games(byForm.get('58:default')).pla).toBeUndefined(); // Hisui has only the Hisuian form
+      expect(games(byDex.get(58)).pla).toBeDefined();              // species-level unchanged
+
+      expect(games(byForm.get('37:alola')).sv).toMatchObject({
+        method: 'wild', versions: ['scarlet'], locations: ['Polar Biome (Terarium)'],
+      });
+      expect(games(byForm.get('37:default')).sv).toBeDefined();
+    } finally {
+      await client.query('drop schema if exists pokeapi_cf cascade').catch(() => {});
+      await client.end();
+    }
+  });
+
   it('serebii supplement fills modern-game locations (gap-fill only, membership-gated)', async () => {
     const serebiiHtml = readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'serebii', 'bulbasaur-locations.html'),

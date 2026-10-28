@@ -5,6 +5,7 @@ import { computeObtainabilityFromSources, mostDirect, type ObtainMethod, type Ob
 import { AVAILABILITY_EXCLUSIONS, STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
 import { addEvidence, emptyEvidence, versionRestriction, type RestrictionContext, type Subject } from './versions.js';
 import { varietyFormSlug } from '../seed/expand.js';
+import { curatedForm } from './regional-forms.js';
 
 /** "kanto-route-25" → "Route 25"; "old-rod" → "old rod". */
 const REGION_PREFIX = /^(kanto|johto|hoenn|sinnoh|sinnoh-pt|unova|unova-b2w2|kalos|alola|galar|hisui|paldea)-/;
@@ -67,7 +68,8 @@ const REGIONAL_VARIETY = '-(alola|galar|hisui|paldea)(-|$)';
  * - where the mirror has encounter rows per form (Gen 7 → SwSh), each form
  *   gets only its own rows — Vulpix in Sun/Moon is the Alolan one.
  *
- * Games with no per-form data (SV, Z-A…) stay species-level.
+ * - games with no per-form data (BDSP, PLA, SV, Z-A) use the cited table in
+ *   regional-forms.ts for which forms exist there and how.
  */
 export async function obtainabilityWithFormsFromMirror(
   client: pg.ClientBase,
@@ -248,8 +250,10 @@ export async function obtainabilityWithFormsFromMirror(
   } catch { /* mirror without form metadata — species-level only */ }
   const varietyBySuffix = new Map(varieties.map((v) => [`${v.dex}:${v.suffix}`, v]));
   const varietyByPid = new Map(varieties.map((v) => [v.pokemonId, v]));
-  // A form isn't in games released before it was introduced.
-  const formInGame = (v: Variety, gameId: string) => !v.introGame || byReleaseOrder(gameId, v.introGame) >= 0;
+  // A form isn't in games released before it was introduced, nor — in games
+  // with only species-level data — when the curated table leaves it out.
+  const formInGame = (v: Variety, gameId: string) =>
+    (!v.introGame || byReleaseOrder(gameId, v.introGame) >= 0) && curatedForm(gameId, v.dex, v.formSlug) !== null;
 
   // Subjects are species (dex) or forms (`p<pokemon id>`). A form evolves from
   // its pre-evolution's same-region form when there is one (Galarian Rapidash ←
@@ -282,6 +286,18 @@ export async function obtainabilityWithFormsFromMirror(
         gameId, method: sum?.method ?? 'available',
         ...(sum ? { locations: sum.locations } : {}),
         ...(versions ? { versions } : {}),
+      };
+    }
+    // Curated games: a form with its own entry uses it; a regional form whose
+    // species' default isn't in the game owns every species-level row.
+    const cur = form ? curatedForm(gameId, dex, form.formSlug) : undefined;
+    const hasOwnEntry = Boolean(cur && (cur.method || cur.locations || cur.versions));
+    const besideDefault = Boolean(cur && form!.formSlug !== 'default' && curatedForm(gameId, dex, 'default') !== null);
+    if (cur && (hasOwnEntry || besideDefault)) {
+      return {
+        gameId, method: cur.method ?? 'available',
+        ...(cur.locations ? { locations: cur.locations } : {}),
+        ...(cur.versions ? { versions: cur.versions } : {}),
       };
     }
     const locations = locsByKey.get(key) ?? supByKey.get(key);
