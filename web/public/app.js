@@ -768,7 +768,7 @@ function renderObtain() {
 
 /* ---------- grid ---------- */
 function tileHint(e) {
-  if (hasEnrichment(e) && e.unobtainableLegit) return { hint: '⊘', title: 'Not legitimately obtainable' };
+  if (hasEnrichment(e) && e.unobtainableLegit) return { hint: '⊘', title: 'Event-only — trade from another player' };
   if (hasEnrichment(e) && e.gmaxCapable) return { hint: 'G✦', title: 'Gigantamax-capable' };
   return { hint: '', title: '' };
 }
@@ -2082,8 +2082,8 @@ function renderSheetInto(e, refocusCaught) {
 
     if (e.unobtainableLegit) {
       const call = elem('div', { border: `1.5px solid ${T.red}`, borderRadius: '12px', padding: '10px 14px', fontSize: '13.5px', lineHeight: '1.5', color: T.text });
-      const strong = elem('strong', { color: T.red }, 'Not legitimately obtainable. ');
-      call.append(strong, document.createTextNode('Event-only distribution — a known gap, not a “needed” you can farm.'));
+      const strong = elem('strong', { color: T.red }, 'Event-only. ');
+      call.append(strong, document.createTextNode('No game gives one any more — get it by trading with another player (not the GTS or Wonder Trade).'));
       ob.append(call);
     }
     // Ownership-aware plan verdict (Ready with your games / Need a game).

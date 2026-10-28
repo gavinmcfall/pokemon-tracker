@@ -32,6 +32,17 @@ export const SHINY_LOCKED_EVERYWHERE = new Set<number>([
 ]);
 
 /**
+ * Forms that only ever came from event distributions and can't evolve or
+ * breed, keyed `${dex}:${formSlug}` — so no game is a way to get one; trading
+ * with another player is (not GTS/Wonder Trade). Their species stays
+ * obtainable. Pikachu in a cap: https://bulbapedia.bulbagarden.net/wiki/Pikachu
+ */
+export const EVENT_ONLY_FORMS = new Set<string>([
+  '25:original_cap', '25:hoenn_cap', '25:sinnoh_cap', '25:unova_cap',
+  '25:kalos_cap', '25:alola_cap', '25:partner_cap', '25:world_cap',
+]);
+
+/**
  * Species with no in-game catch/gift path in ANY currently-playable game —
  * event-only distributions (and, for Magearna, a HOME reward). These render as
  * "event-only" in the planner rather than pretending to be catchable. Each has
