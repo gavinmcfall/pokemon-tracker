@@ -237,6 +237,9 @@ const FIXTURE: Record<string, string> = {
       expect(games(byForm.get('38:default')).sm).toBeUndefined();
       expect(games(byForm.get('37:default')).sm).toBeUndefined();
       expect(games(byForm.get('38:default')).rb).toMatchObject({ method: 'evolve' });
+      // Pikachu in a cap: event-only, though Pikachu itself is wild.
+      expect(byForm.get('25:original_cap')).toMatchObject({ availability: [], unobtainableLegit: true, evolveFrom: null });
+      expect(games(byForm.get('25:default')).rb).toMatchObject({ method: 'wild' });
     } finally {
       await client.query('drop schema if exists pokeapi_ev cascade').catch(() => {});
       await client.end();

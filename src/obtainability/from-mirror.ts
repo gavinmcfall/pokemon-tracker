@@ -2,7 +2,7 @@ import type pg from 'pg';
 import type { EvolveFrom, Obtainability } from '../types.js';
 import { RELEASE_BY_ID, VERSION_GROUP_TO_GAME, byReleaseOrder, releaseForVersion } from './games.js';
 import { computeObtainabilityFromSources, mostDirect, type ObtainMethod, type ObtainSource } from './compute.js';
-import { AVAILABILITY_EXCLUSIONS, STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
+import { AVAILABILITY_EXCLUSIONS, EVENT_ONLY_FORMS, STARTER_GIFTS, STATIC_AVAILABILITY } from './curated.js';
 import { addEvidence, emptyEvidence, versionRestriction, type RestrictionContext, type Subject } from './versions.js';
 import { varietyFormSlug } from '../seed/expand.js';
 import { curatedForm } from './regional-forms.js';
@@ -407,6 +407,11 @@ export async function obtainabilityWithFormsFromMirror(
     }
     for (const s of curated(v.dex)) if (formInGame(v, s.gameId)) sources.push(s);
     byForm.set(`${v.dex}:${v.formSlug}`, build(v.dex, sources));
+  }
+  // Event-only forms (Pikachu in a cap): no game gives one, nothing evolves into one.
+  for (const key of EVENT_ONLY_FORMS) {
+    const base = byDex.get(Number(key.split(':')[0]));
+    if (base) byForm.set(key, { ...base, availability: [], catchableOnSwitch: false, unobtainableLegit: true, evolveFrom: null });
   }
   return { byDex, byForm };
 }
