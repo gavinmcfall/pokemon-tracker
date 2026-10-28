@@ -225,7 +225,7 @@ const FIXTURE: Record<string, string> = {
       await client.query('create schema pokeapi_ev');
       for (const [table, csv] of Object.entries(fx)) await loadCsv(client, 'pokeapi_ev', table, csv);
 
-      const { byForm } = await obtainabilityWithFormsFromMirror(client, 'pokeapi_ev');
+      const { byDex, byForm } = await obtainabilityWithFormsFromMirror(client, 'pokeapi_ev');
       const games = (ob: Obtainability | undefined) => Object.fromEntries((ob?.availability ?? []).map((a) => [a.gameId, a]));
 
       // Pikachu evolves into Alolan Raichu in Alola, Kantonian Raichu elsewhere.
@@ -239,7 +239,7 @@ const FIXTURE: Record<string, string> = {
       expect(games(byForm.get('38:default')).rb).toMatchObject({ method: 'evolve' });
       // Pikachu in a cap: event-only, though Pikachu itself is wild.
       expect(byForm.get('25:original_cap')).toMatchObject({ availability: [], unobtainableLegit: true, evolveFrom: null });
-      expect(games(byForm.get('25:default')).rb).toMatchObject({ method: 'wild' });
+      expect(games(byDex.get(25)).rb).toMatchObject({ method: 'wild' });
     } finally {
       await client.query('drop schema if exists pokeapi_ev cascade').catch(() => {});
       await client.end();
