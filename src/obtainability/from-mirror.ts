@@ -58,6 +58,20 @@ function summarizeEncounters(encs: { loc: string; method: string }[]): { method:
 
 const REGIONAL_VARIETY = '-(alola|galar|hisui|paldea)(-|$)';
 
+/** Region of a regional form slug (`galar_standard` → galar); null for others (`alola_cap`, `totem_alola`). */
+function regionOf(formSlug: string): string | null {
+  const m = /^(alola|galar|hisui|paldea)(_|$)/.exec(formSlug);
+  return m && !formSlug.endsWith('_cap') ? m[1]! : null;
+}
+
+/**
+ * Games set in a regional form's own region, among those with per-form
+ * encounter data. There, an original-form pre-evolution evolves into the
+ * regional form (Pikachu → Alolan Raichu in Alola, Koffing → Galarian Weezing
+ * in Galar), and the original form of a species with a native form isn't found.
+ */
+const NATIVE_GAMES: Record<string, string[]> = { alola: ['sm', 'usum'], galar: ['swsh'] };
+
 /**
  * Species-level obtainability (`byDex`) plus per-form obtainability for
  * regional forms (`byForm`, keyed `${dex}:${formSlug}`, including the species'
@@ -66,7 +80,8 @@ const REGIONAL_VARIETY = '-(alola|galar|hisui|paldea)(-|$)';
  * - a form can't be in a game released before it was introduced (no Alolan
  *   Vulpix in Red/Blue);
  * - where the mirror has encounter rows per form (Gen 7 → SwSh), each form
- *   gets only its own rows — Vulpix in Sun/Moon is the Alolan one.
+ *   gets only its own rows — Vulpix in Sun/Moon is the Alolan one; a form
+ *   with none is evolved, or absent beside the game's native regional form.
  *
  * - games with no per-form data (BDSP, PLA, SV, Z-A) use the cited table in
  *   regional-forms.ts for which forms exist there and how.
@@ -243,7 +258,7 @@ export async function obtainabilityWithFormsFromMirror(
         pokemonId: r.pokemon_id,
         dex: Number(r.species_id),
         formSlug,
-        suffix: isDefault ? '' : formSlug.split('_')[0]!, // 'alola', 'galar', …
+        suffix: isDefault ? '' : (regionOf(formSlug) ?? formSlug), // 'alola', 'galar', …
         introGame: isDefault || !r.intro_vg ? null : (VERSION_GROUP_TO_GAME[r.intro_vg] ?? null),
       });
     }
@@ -339,12 +354,56 @@ export async function obtainabilityWithFormsFromMirror(
   const byDex = new Map<number, Obtainability>();
   for (const dex of metaByDex.keys()) byDex.set(dex, build(dex, sourcesByDex.get(dex) ?? []));
 
+  // A form with no encounter rows of its own, in a game whose data is per form:
+  // evolve it from an obtainable pre-evolution, or — an original form beside
+  // the game's own native regional form — it isn't there (no Kantonian Vulpix
+  // in Sun/Moon). Anything else stays as the data says (a mirror gap is not
+  // proof of absence).
+  const gamesWithEncounters = new Set([...encountersByKey.keys()].map((k) => k.slice(k.indexOf(':') + 1)));
+  const varietiesByDex = new Map<number, Variety[]>();
+  for (const v of varieties) (varietiesByDex.get(v.dex) ?? varietiesByDex.set(v.dex, []).get(v.dex)!).push(v);
+  type Presence = 'rows' | 'evolve' | 'absent' | 'unknown';
+  const presence = new Map<string, Presence>();
+  const obtainable = (s: Subject, gameId: string): boolean => {
+    const v = variety(s);
+    return v ? presenceOf(v, gameId) !== 'absent' : inGame.has(`${s}:${gameId}`);
+  };
+  const presenceOf = (v: Variety, gameId: string): Presence => {
+    const key = `${v.pokemonId}:${gameId}`;
+    const known = presence.get(key);
+    if (known) return known;
+    presence.set(key, 'unknown'); // cycle guard
+    let p: Presence;
+    if (!inGame.has(`${v.dex}:${gameId}`) || !formInGame(v, gameId)) p = 'absent';
+    else if (encountersByVariety.has(key)) p = 'rows';
+    else if (!gamesWithEncounters.has(gameId) || curatedForm(gameId, v.dex, v.formSlug) !== undefined
+      || (v.formSlug !== 'default' && !regionOf(v.formSlug))) p = 'unknown';
+    else {
+      const native = v.formSlug === 'default'
+        ? (varietiesByDex.get(v.dex) ?? []).find((o) => o !== v && NATIVE_GAMES[o.suffix]?.includes(gameId) && obtainable(`p${o.pokemonId}`, gameId))
+        : undefined;
+      const pre = ctx.evolvesFrom(`p${v.pokemonId}`);
+      const preDex = evolveFromByDex.get(v.dex)?.dex;
+      // Natively, an original pre-evolution without a native form of its own
+      // evolves into the regional form, not this one.
+      const yieldsNative = native !== undefined && !varietyBySuffix.has(`${preDex}:${native.suffix}`);
+      if (pre !== null && !yieldsNative && obtainable(pre, gameId)) p = 'evolve';
+      else p = native ? 'absent' : 'unknown';
+    }
+    presence.set(key, p);
+    return p;
+  };
+
   const byForm = new Map<string, Obtainability>();
   for (const v of varieties) {
     if (!metaByDex.has(v.dex)) continue;
     const sources: ObtainSource[] = [];
     for (const { row, gameId } of membersByDex.get(v.dex) ?? []) {
-      if (formInGame(v, gameId)) sources.push(sourceFor(row, v.dex, gameId, v));
+      if (!formInGame(v, gameId)) continue;
+      const p = presenceOf(v, gameId);
+      if (p === 'absent') continue;
+      const s = sourceFor(row, v.dex, gameId, v);
+      sources.push(p === 'evolve' ? { gameId, method: 'evolve', ...(s.versions ? { versions: s.versions } : {}) } : s);
     }
     for (const s of curated(v.dex)) if (formInGame(v, s.gameId)) sources.push(s);
     byForm.set(`${v.dex}:${v.formSlug}`, build(v.dex, sources));

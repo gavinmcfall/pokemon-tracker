@@ -333,7 +333,10 @@ introduced_in_version_group_id` — no Alolan Vulpix in Red/Blue), and where the
 mirror has encounter rows per form (Gen 7 → SwSh, Let's Go included) each form
 gets only its own method, locations and version exclusives (Vulpix in Sun/Moon
 is the Alolan one; Galarian Ponyta is Shield-only, inherited by Galarian
-Rapidash via its same-region pre-evolution). Games with no per-form data (BDSP,
+Rapidash via its same-region pre-evolution). A form with no rows of its own
+there is `evolve` when its pre-evolution is obtainable, and absent when it's
+the original form beside the game's native regional one — no Kantonian Vulpix
+in Sun/Moon, and Pikachu evolves into Alolan (not Kantonian) Raichu in Alola. Games with no per-form data (BDSP,
 PLA, SV, Z-A) use a cited per-game table (`src/obtainability/regional-forms.ts`):
 which forms exist there, and how/where/which cartridge for the ones the mirror
 can't describe — BDSP has none, Legends: Arceus swaps in Hisuian forms, SV's
