@@ -334,9 +334,12 @@ mirror has encounter rows per form (Gen 7 → SwSh, Let's Go included) each form
 gets only its own method, locations and version exclusives (Vulpix in Sun/Moon
 is the Alolan one; Galarian Ponyta is Shield-only, inherited by Galarian
 Rapidash via its same-region pre-evolution). Games with no per-form data (BDSP,
-PLA, SV, Z-A) stay species-level, so a regional form can still be over-claimed
-there (e.g. Galarian forms in BDSP/PLA, where they don't exist) — closing that
-needs a cited per-game table, not a guess.
+PLA, SV, Z-A) use a cited per-game table (`src/obtainability/regional-forms.ts`):
+which forms exist there, and how/where/which cartridge for the ones the mirror
+can't describe — BDSP has none, Legends: Arceus swaps in Hisuian forms, SV's
+Indigo Disk adds Alolan forms (Alolan Vulpix Scarlet-only, Sandshrew
+Violet-only), Z-A's Mega Dimension adds most of its own. HOME transfer-only
+forms aren't listed. Sources are in the file's comments.
 
 **Version exclusives** (`src/obtainability/versions.ts`). Dex membership is per
 version group, so it can't tell Scarlet from Violet; per-cartridge catch
