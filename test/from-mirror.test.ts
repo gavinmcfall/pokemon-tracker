@@ -177,13 +177,68 @@ const FIXTURE: Record<string, string> = {
 
       const kanto = games(byForm.get('37:default'));
       expect(kanto.rb).toMatchObject({ method: 'wild', locations: ['Route 7'] });
-      expect(kanto.sm).toMatchObject({ method: 'available' }); // the Alolan form's rows aren't its own
-      expect(kanto.sm?.locations).toBeUndefined();
+      expect(kanto.sm).toBeUndefined(); // the Alolan form's rows aren't its own; Alola has only that one
 
       // Species-level record is unchanged (other forms fall back to it).
       expect(games(byDex.get(37)).sm).toMatchObject({ method: 'wild' });
     } finally {
       await client.query('drop schema if exists pokeapi_rf cascade').catch(() => {});
+      await client.end();
+    }
+  });
+
+  it('evolves forms with no rows of their own, and drops original forms beside a native one', async () => {
+    // Pikachu (25) wild in Red and Sun; Alolan Vulpix (10103) wild in Sun.
+    // Raichu (26) and Ninetales (38) have no rows anywhere: they're evolved.
+    const fx: Record<string, string> = {
+      version_groups: 'id,identifier\n1,red-blue\n17,sun-moon\n',
+      versions: 'id,version_group_id,identifier\n1,1,red\n2,1,blue\n27,17,sun\n28,17,moon\n',
+      pokedexes: 'id,region_id,identifier,is_main_series\n2,1,kanto,1\n16,7,original-alola,1\n',
+      pokedex_version_groups: 'pokedex_id,version_group_id\n2,1\n16,17\n',
+      pokemon_dex_numbers:
+        'species_id,pokedex_id,pokedex_number\n25,2,25\n26,2,26\n37,2,37\n38,2,38\n' +
+        '25,16,25\n26,16,26\n37,16,40\n38,16,41\n',
+      pokemon_species:
+        'id,identifier,generation_id,has_gender_differences,evolves_from_species_id\n' +
+        '25,pikachu,1,0,\n26,raichu,1,0,25\n37,vulpix,1,0,\n38,ninetales,1,0,37\n',
+      pokemon:
+        'id,species_id,identifier,is_default\n25,25,pikachu,1\n26,26,raichu,1\n10100,26,raichu-alola,0\n' +
+        '37,37,vulpix,1\n10103,37,vulpix-alola,0\n38,38,ninetales,1\n10104,38,ninetales-alola,0\n',
+      pokemon_forms:
+        'id,pokemon_id,identifier,is_default,introduced_in_version_group_id\n' +
+        '25,25,pikachu,1,1\n26,26,raichu,1,1\n10100,10100,raichu-alola,1,17\n' +
+        '37,37,vulpix,1,1\n10103,10103,vulpix-alola,1,17\n38,38,ninetales,1,1\n10104,10104,ninetales-alola,1,17\n',
+      encounters:
+        'id,version_id,location_area_id,encounter_slot_id,pokemon_id\n' +
+        '1,1,10,20,25\n2,2,10,20,25\n3,27,11,21,25\n4,28,11,21,25\n5,27,11,21,10103\n6,1,10,20,37\n7,2,10,20,37\n',
+      location_areas: 'id,location_id,identifier\n10,30,kanto-route-7-area\n11,31,alola-route-14-area\n',
+      locations: 'id,region_id,identifier\n30,1,kanto-route-7\n31,7,alola-route-14\n',
+      encounter_slots: 'id,version_group_id,encounter_method_id,slot,rarity\n20,1,1,1,50\n21,17,1,1,50\n',
+      encounter_methods: 'id,identifier\n1,walk\n',
+      pokemon_evolution: 'id,evolved_species_id,evolution_trigger_id\n1,26,2\n2,38,2\n',
+      evolution_triggers: 'id,identifier\n1,level-up\n2,use-item\n',
+    };
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try {
+      await client.query('drop schema if exists pokeapi_ev cascade');
+      await client.query('create schema pokeapi_ev');
+      for (const [table, csv] of Object.entries(fx)) await loadCsv(client, 'pokeapi_ev', table, csv);
+
+      const { byForm } = await obtainabilityWithFormsFromMirror(client, 'pokeapi_ev');
+      const games = (ob: Obtainability | undefined) => Object.fromEntries((ob?.availability ?? []).map((a) => [a.gameId, a]));
+
+      // Pikachu evolves into Alolan Raichu in Alola, Kantonian Raichu elsewhere.
+      expect(games(byForm.get('26:alola')).sm).toMatchObject({ method: 'evolve' });
+      expect(games(byForm.get('26:default')).sm).toBeUndefined();
+      expect(games(byForm.get('26:default')).rb).toMatchObject({ method: 'evolve' });
+      // Alolan Ninetales from Alolan Vulpix (Sun only); no Kantonian line in Alola.
+      expect(games(byForm.get('38:alola')).sm).toMatchObject({ method: 'evolve', versions: ['sun'] });
+      expect(games(byForm.get('38:default')).sm).toBeUndefined();
+      expect(games(byForm.get('37:default')).sm).toBeUndefined();
+      expect(games(byForm.get('38:default')).rb).toMatchObject({ method: 'evolve' });
+    } finally {
+      await client.query('drop schema if exists pokeapi_ev cascade').catch(() => {});
       await client.end();
     }
   });
