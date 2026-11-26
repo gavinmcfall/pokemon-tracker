@@ -1,0 +1,99 @@
+name: pokepc update
+
+# Weekly: regenerate src/obtainability/pokepc-data.ts from the latest
+# pokepc/dataset commit and open a PR when availability changed. Nothing ships
+# without review: merge the PR, then bump the image tags in home-ops as usual.
+on:
+  schedule:
+    - cron: '0 8 * * 0' # Sunday 08:00 UTC = Sunday 21:00 NZDT (20:00 NZST)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: pokepc-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # pokepc is data only: its JSON is read, none of its code is run.
+      - name: Fetch pokepc/dataset
+        run: git clone --depth 1 https://github.com/pokepc/dataset "$RUNNER_TEMP/pokepc"
+
+      - name: Regenerate
+        id: regen
+        run: |
+          npx tsx scripts/update-pokepc.ts "$RUNNER_TEMP/pokepc" "$RUNNER_TEMP/changes.md"
+          commit=$(git -C "$RUNNER_TEMP/pokepc" rev-parse HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "branch=pokepc/update-${commit:0:7}" >> "$GITHUB_OUTPUT"
+          if git diff --quiet -- src/obtainability/pokepc-data.ts; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "pokepc-data.ts already matches pokepc ${commit:0:7}."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if a PR for this commit already exists
+        id: existing
+        if: steps.regen.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.regen.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Branch $BRANCH already exists; leaving its PR alone."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Typecheck and test
+        if: steps.regen.outputs.changed == 'true' && steps.existing.outputs.exists == 'false'
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Open PR
+        if: steps.regen.outputs.changed == 'true' && steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.regen.outputs.branch }}
+          COMMIT: ${{ steps.regen.outputs.commit }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add src/obtainability/pokepc-data.ts
+          git commit -m "chore(data): update pokepc/dataset to ${COMMIT:0:7}"
+          git push origin "$BRANCH"
+          {
+            echo "Automated weekly update of \`src/obtainability/pokepc-data.ts\` to [pokepc/dataset@${COMMIT:0:7}](https://github.com/pokepc/dataset/commit/$COMMIT)."
+            echo
+            echo "Typecheck and tests passed in the update job. Before merging, check these against \`POKEPC_CORRECTIONS\` (in \`curated.ts\`); a change that looks wrong needs a correction there:"
+            echo
+            if [ -s "$RUNNER_TEMP/changes.md" ]; then
+              head -n 200 "$RUNNER_TEMP/changes.md"
+              lines=$(wc -l < "$RUNNER_TEMP/changes.md")
+              if [ "$lines" -gt 200 ]; then echo; echo "…and $((lines - 200)) more; see the diff."; fi
+            else
+              echo "_No availability changes (header or ordering only)._"
+            fi
+            echo
+            echo "After merge: bump the livingdex image tags in home-ops; the next seed applies it."
+          } > "$RUNNER_TEMP/body.md"
+          gh pr create --base main --head "$BRANCH" --title "chore(data): update pokepc/dataset to ${COMMIT:0:7}" --body-file "$RUNNER_TEMP/body.md"
+          # PRs opened with the workflow token don't trigger CI on their own.
+          gh workflow run ci.yaml --ref "$BRANCH"
