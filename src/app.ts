@@ -115,6 +115,14 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
       if (typeof b.inHome !== 'boolean') return badRequest('inHome must be a boolean');
       patch.inHome = b.inHome;
     }
+    if (b.heldIn !== undefined) {
+      // The save holding a form HOME can't store: a game release, or null.
+      const release = b.heldIn === null ? null : RELEASE_BY_ID.get(String(b.heldIn));
+      if (b.heldIn !== null && (typeof b.heldIn !== 'string' || !release || release.platform === 'service')) {
+        return badRequest(`heldIn must be a game release id or null, got "${String(b.heldIn)}"`);
+      }
+      patch.heldIn = release ? release.releaseId : null;
+    }
 
     const status = await store.setStatus(patch);
     if (status === null) return c.json({ error: `unknown entryKey "${patch.entryKey}"` }, 404);
@@ -155,7 +163,8 @@ export function createApp(store: Store, options: AppOptions = {}): Hono {
         const metaChanged =
           (patch.gameOrigin !== undefined && patch.gameOrigin !== (cur?.gameOrigin ?? undefined)) ||
           (patch.method !== undefined && patch.method !== (cur?.method ?? undefined)) ||
-          (patch.notes !== undefined && patch.notes !== (cur?.notes ?? undefined));
+          (patch.notes !== undefined && patch.notes !== (cur?.notes ?? undefined)) ||
+          (patch.heldIn !== undefined && patch.heldIn !== (cur?.heldIn ?? undefined));
         if (before !== patch.caught || metaChanged) {
           changes.push({ entryKey: patch.entryKey, caught: { from: before, to: patch.caught }, metaChanged });
         }

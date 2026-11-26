@@ -75,6 +75,8 @@ async function resetState(): Promise<void> {
     { entryKey: '0006-mega_x-male', obtainability: ob({
       availability: [{ gameId: 'rb', label: 'Red/Blue', platform: 'gb', method: 'evolve', shinyPossible: true }],
       gmaxCapable: true, originGames: ['rb', 'yellow'],
+      // Battle-only: HOME can't store a mega, so it's tracked against a save.
+      keptIn: { kind: 'battle', releases: ['red', 'blue'] },
     }) },
     { entryKey: '0666-fancy-female', obtainability: ob({
       availability: [{ gameId: 'sv', label: 'Scarlet/Violet', platform: 'switch', method: 'wild', shinyPossible: true }],

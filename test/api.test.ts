@@ -343,6 +343,16 @@ describe('GET /api/plan', () => {
     expect(cleared.inHome).toBe(true);
   });
 
+  it('status accepts heldIn as a game release id or null, and rejects anything else', async () => {
+    const saved = await json(await post('/api/status', { entryKey: '0006-default-male', caught: true, heldIn: 'scarlet' }));
+    expect(saved).toMatchObject({ caught: true, heldIn: 'scarlet' });
+    expect((await post('/api/status', { entryKey: '0006-default-male', caught: true, heldIn: 'sv' })).status).toBe(400);
+    expect((await post('/api/status', { entryKey: '0006-default-male', caught: true, heldIn: 'bank' })).status).toBe(400);
+    expect((await post('/api/status', { entryKey: '0006-default-male', caught: true, heldIn: 7 })).status).toBe(400);
+    const cleared = await json(await post('/api/status', { entryKey: '0006-default-male', caught: true, heldIn: null }));
+    expect(cleared.heldIn).toBeNull();
+  });
+
   it('?gender= is validated and echoed (contract fixture has no collapsible pairs)', async () => {
     const body = await json(await get('/api/plan?gender=distinct'));
     expect(body.gender).toBe('distinct');

@@ -30,7 +30,8 @@ const GAME_LABELS = {
   frlg:'FireRed/LeafGreen', dp:'Diamond/Pearl', pt:'Platinum', hgss:'HeartGold/SoulSilver',
   bw:'Black/White', b2w2:'Black 2/White 2', xy:'X/Y', oras:'Omega Ruby/Alpha Sapphire',
   sm:'Sun/Moon', usum:'Ultra Sun/Ultra Moon', lgpe:'Let’s Go', swsh:'Sword/Shield',
-  bdsp:'Brilliant Diamond/Shining Pearl', pla:'Legends: Arceus', sv:'Scarlet/Violet', go:'Pokémon GO',
+  bdsp:'Brilliant Diamond/Shining Pearl', pla:'Legends: Arceus', sv:'Scarlet/Violet', za:'Legends: Z-A',
+  'frlg-switch':'FireRed/LeafGreen (Switch)', go:'Pokémon GO',
 };
 // Release ids ('violet') label from the games list once it has loaded.
 const gameLabel = (slug) => (slug ? (GAME_LABELS[slug] ?? state.releaseLabels.get(slug) ?? slug.toUpperCase()) : null);
@@ -1026,8 +1027,11 @@ function plannerRow(e, stopGameId, opportunistic) {
       const prev = statusSnapshot(e);
       const patch = { caught: !c };
       if (!c) {
-        // A fresh session catch sits on this cartridge until you transfer it.
-        patch.inHome = false;
+        // A fresh session catch sits on this cartridge until you transfer it —
+        // or, for a form HOME can't store, stays in this save for good.
+        if (e.keptIn) {
+          if (e.keptIn.releases.includes(stopGameId)) patch.heldIn = stopGameId;
+        } else patch.inHome = false;
         // Record where it was caught, unless the owner already noted an origin.
         if (!(e.status && e.status.gameOrigin)) patch.gameOrigin = gameLabel(stopGameId) ?? stopGameId;
       }
@@ -1272,7 +1276,7 @@ async function bulkMarkTransferred(entryKeys) {
 
 /** Catches sitting in a game awaiting transfer to HOME, grouped by origin. */
 function backlogSection() {
-  const waiting = state.entries.filter((e) => isCaught(e) && e.status && e.status.inHome === false);
+  const waiting = state.entries.filter((e) => isCaught(e) && !e.keptIn && e.status && e.status.inHome === false);
   if (waiting.length === 0) return null;
   const groups = new Map();
   for (const e of waiting) {
@@ -1762,10 +1766,10 @@ async function saveStatus(entryKey, patch, opts = {}) {
   const prev = e.status ? { ...e.status } : null;
   const caught = 'caught' in patch ? patch.caught : Boolean(e.status && e.status.caught);
   // optimistic local update
-  e.status = { ...(e.status ?? { entryKey, caught: false, caughtAt: null, gameOrigin: null, method: null, notes: null, inHome: true }), ...patch, caught };
+  e.status = { ...(e.status ?? { entryKey, caught: false, caughtAt: null, gameOrigin: null, method: null, notes: null, inHome: true, heldIn: null }), ...patch, caught };
 
   const body = { entryKey, caught };
-  for (const f of ['gameOrigin', 'method', 'notes', 'inHome']) if (f in patch) body[f] = patch[f];
+  for (const f of ['gameOrigin', 'method', 'notes', 'inHome', 'heldIn']) if (f in patch) body[f] = patch[f];
   if ('caught' in patch) invalidateScope(); // caught-any group representatives may shift
 
   if (opts.membershipMayChange) {
@@ -1800,7 +1804,7 @@ async function saveStatus(entryKey, patch, opts = {}) {
 /** Snapshot the fields a quick toggle can touch, for one-tap Undo. */
 function statusSnapshot(e) {
   return e.status
-    ? { caught: Boolean(e.status.caught), gameOrigin: e.status.gameOrigin, method: e.status.method, notes: e.status.notes, inHome: e.status.inHome }
+    ? { caught: Boolean(e.status.caught), gameOrigin: e.status.gameOrigin, method: e.status.method, notes: e.status.notes, inHome: e.status.inHome, heldIn: e.status.heldIn ?? null }
     : { caught: false };
 }
 
@@ -1969,7 +1973,10 @@ function renderSheetInto(e, refocusCaught) {
   caughtBtn.type = 'button'; caughtBtn.setAttribute('aria-pressed', String(st.caught));
   caughtBtn.addEventListener('click', () => saveStatus(e.entryKey, { caught: !st.caught }, { membershipMayChange: true, rerenderSheet: true }));
   caughtRow.append(caughtBtn);
-  if (st.caught) {
+  if (st.caught && e.keptIn) {
+    // HOME can't store this form: record which game save holds it.
+    caughtRow.append(keptInField(e, st));
+  } else if (st.caught) {
     // Transfer state: banked in HOME, or still sitting in its origin game.
     const inHome = st.inHome !== false;
     const homeBtn = elem('button', {
@@ -2086,6 +2093,17 @@ function renderSheetInto(e, refocusCaught) {
       call.append(strong, document.createTextNode('No game gives one any more — get it by trading with another player (not the GTS or Wonder Trade).'));
       ob.append(call);
     }
+    if (e.keptIn) {
+      const call = elem('div', { border: `1.5px solid ${T.gold}`, borderRadius: '12px', padding: '10px 14px', fontSize: '13.5px', lineHeight: '1.5', color: T.text });
+      const where = e.keptIn.releases.map((r) => gameLabel(r)).join(', ');
+      call.append(
+        elem('strong', { color: T.gold }, e.keptIn.kind === 'battle' ? 'Battle-only form. ' : 'Pokémon HOME can’t store this form. '),
+        document.createTextNode(e.keptIn.kind === 'battle'
+          ? `It only exists mid-battle, so keep the base Pokémon and the item that triggers it in a save of: ${where || 'no current game'}.`
+          : `It reverts or is refused on deposit, so it lives in a game save: ${where || 'no current game'}.`),
+      );
+      ob.append(call);
+    }
     // Ownership-aware plan verdict (Ready with your games / Need a game).
     const plan = state.plan[e.entryKey];
     if (plan && (plan.verdict === 'ready' || plan.verdict === 'need-game')) {
@@ -2194,6 +2212,20 @@ function renderSheetInto(e, refocusCaught) {
   }
 
   if (refocusCaught) setTimeout(() => { const b = panel.querySelector('.sheet-section button[aria-pressed]'); if (b) b.focus(); }, 10);
+}
+
+/** "Kept in" picker for a form HOME can't store: which save holds it. */
+function keptInField(e, st) {
+  const field = elem('label', { minWidth: '220px' }); field.className = 'field';
+  field.append(elem('span', null, 'KEPT IN SAVE')); field.firstChild.className = 'field-label';
+  const select = document.createElement('select');
+  select.className = 'kept-in';
+  select.append(new Option('— which save? —', ''));
+  for (const r of e.keptIn.releases) select.append(new Option(gameLabel(r), r));
+  select.value = st.heldIn ?? '';
+  select.addEventListener('change', () => saveStatus(e.entryKey, { caught: true, heldIn: select.value || null }, { rerenderSheet: true }));
+  field.append(select);
+  return field;
 }
 
 function comboField(label, listId, suggestions, value, placeholder, onSave) {

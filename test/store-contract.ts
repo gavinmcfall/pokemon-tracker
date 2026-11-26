@@ -149,6 +149,38 @@ export function storeContract(name: string, makeStore: () => Promise<Store>): vo
       expect(s?.inHome).toBe(true);
     });
 
+    it('heldIn: null by default, patches persist, metadata patches keep it, uncatch clears it', async () => {
+      const store = await makeStore();
+      await store.upsertEntries(CONTRACT_ENTRIES);
+      let s = await store.setStatus({ entryKey: '0006-mega_x-male', caught: true });
+      expect(s?.heldIn).toBeNull();
+      s = await store.setStatus({ entryKey: '0006-mega_x-male', caught: true, heldIn: 'legends-z-a' });
+      expect(s?.heldIn).toBe('legends-z-a');
+      s = await store.setStatus({ entryKey: '0006-mega_x-male', caught: true, notes: 'with Charizardite X' });
+      expect(s?.heldIn).toBe('legends-z-a');
+      const listed = (await store.listEntries({ status: 'caught' }))[0]!;
+      expect(listed.status?.heldIn).toBe('legends-z-a');
+      s = await store.setStatus({ entryKey: '0006-mega_x-male', caught: false });
+      expect(s?.heldIn).toBeNull();
+    });
+
+    it('replaceObtainability keeps keptIn (null when HOME stores the form)', async () => {
+      const store = await makeStore();
+      await store.upsertEntries(CONTRACT_ENTRIES);
+      const base = {
+        availability: [{ gameId: 'za', label: 'Legends: Z-A', platform: 'switch', method: 'available', shinyPossible: true }],
+        gmaxCapable: false, teraAvailable: false, catchableOnSwitch: true, shinyLegalSomewhere: true,
+        unobtainableLegit: false, genderVisualDiff: false, shinyLockedIn: [], originGames: [],
+      };
+      await store.replaceObtainability([
+        { entryKey: '0006-mega_x-male', obtainability: { ...base, keptIn: { kind: 'battle', releases: ['x', 'legends-z-a'] } } },
+        { entryKey: '0006-default-male', obtainability: base },
+      ]);
+      const list = await store.listEntries({});
+      expect(list.find((e) => e.entryKey === '0006-mega_x-male')!.obtainability?.keptIn).toEqual({ kind: 'battle', releases: ['x', 'legends-z-a'] });
+      expect(list.find((e) => e.entryKey === '0006-default-male')!.obtainability?.keptIn ?? null).toBeNull();
+    });
+
     it('deleteEntries removes the slot and its dependent rows, reports the count', async () => {
       const store = await makeStore();
       await store.upsertEntries(CONTRACT_ENTRIES);

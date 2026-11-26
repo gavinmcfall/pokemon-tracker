@@ -49,7 +49,7 @@ describe('pokepcAvailability', () => {
   });
 
   it('is null for forms pokepc has no record of', () => {
-    expect(pokepcAvailability(6, 'mega_x')).toBeNull();
+    expect(pokepcAvailability(25, 'cosplay')).toBeNull();
   });
 });
 
@@ -90,11 +90,32 @@ describe('applyPokepc', () => {
     expect(pecharunt.unobtainableLegit).toBe(true);
   });
 
+  it('marks forms HOME cannot store: fusions and held-item forms live in a save, battle-only ones in the games that trigger them', () => {
+    const black = applyPokepc(646, 'black', ob([entry('bw', 'available')]));
+    expect(black.keptIn?.kind).toBe('save');
+    expect(black.keptIn?.releases).toEqual(expect.arrayContaining(['sword', 'shield', 'scarlet', 'violet']));
+    expect(games(black)).toEqual(expect.arrayContaining(['swsh', 'sv']));
+    const sunny = applyPokepc(351, 'sunny', ob([]));
+    expect(sunny.keptIn?.kind).toBe('battle');
+    expect(sunny.keptIn?.releases).toEqual(expect.arrayContaining(['brilliant-diamond', 'go']));
+    expect(sunny.catchableOnSwitch).toBe(true);
+    const absol = applyPokepc(359, 'mega_z', ob([entry('xy', 'available')]));
+    expect(games(absol)).toEqual(['za']);
+    expect(applyPokepc(1, 'default', ob([])).keptIn).toBeNull();
+  });
+
+  it('FireRed/LeafGreen on Switch shares the GBA game, which has no ticket legendaries', () => {
+    const lugia = applyPokepc(249, 'default', ob([entry('frlg', 'static', { locations: ['Navel Rock'] })]));
+    expect(game(lugia, 'frlg')).toBeUndefined();
+    expect(game(lugia, 'frlg-switch')).toMatchObject({ method: 'static', locations: ['Navel Rock'], platform: 'switch' });
+    expect(game(applyPokepc(386, 'attack', ob([])), 'frlg-switch')).toMatchObject({ versions: ['firered-switch'] });
+  });
+
   it('leaves event-only forms, unknown forms and games pokepc does not cover alone', () => {
     const cap = ob([], { unobtainableLegit: true });
     expect(applyPokepc(25, 'original_cap', cap)).toBe(cap);
-    const mega = ob([entry('xy', 'available')]);
-    expect(applyPokepc(6, 'mega_x', mega)).toBe(mega);
+    const cosplay = ob([entry('oras', 'gift')]);
+    expect(applyPokepc(25, 'cosplay', cosplay)).toBe(cosplay);
     expect(games(applyPokepc(6, 'default', ob([entry('ww', 'wild')])))).toContain('ww');
   });
 });

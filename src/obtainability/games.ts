@@ -43,6 +43,11 @@ export const GAMES: GameMeta[] = [
   // Availability comes from the lumiose-city dex (base game) and the hyperspace
   // dex (Mega Dimension DLC) via VERSION_GROUP_TO_GAME below.
   { gameId: 'za', label: 'Legends: Z-A', platform: 'switch', generation: 9 },
+  // The 2026 eShop re-release of FireRed/LeafGreen (Switch, plays on Switch 2).
+  // Same game as the GBA original, but the Mystic and Aurora Tickets are built
+  // in and it transfers one-way into HOME (v4.1.0, 7 Oct 2026). Its
+  // availability is FRLG's (pokepc lists the Switch copies with the GBA ones).
+  { gameId: 'frlg-switch', label: 'FireRed/LeafGreen (Switch)', platform: 'switch', generation: 3 },
   // Gen 10, Switch 2 exclusive, 2027 — unreleased, so no availability/transfer yet.
   { gameId: 'ww', label: 'Winds/Waves', platform: 'switch2', generation: 10 },
   { gameId: 'go', label: 'Pokémon GO', platform: 'mobile', generation: 0 },
@@ -143,6 +148,8 @@ export const RELEASES: ReleaseMeta[] = [
   { releaseId: 'scarlet', label: 'Scarlet', platform: 'switch', generation: 9, versionGroup: 'sv' },
   { releaseId: 'violet', label: 'Violet', platform: 'switch', generation: 9, versionGroup: 'sv' },
   { releaseId: 'legends-z-a', label: 'Legends: Z-A', platform: 'switch', generation: 9, versionGroup: 'za' },
+  { releaseId: 'firered-switch', label: 'FireRed (Switch)', platform: 'switch', generation: 3, versionGroup: 'frlg-switch' },
+  { releaseId: 'leafgreen-switch', label: 'LeafGreen (Switch)', platform: 'switch', generation: 3, versionGroup: 'frlg-switch' },
   // Gen 10, Switch 2 exclusive, upcoming (2027). Listed so ownership can be
   // tracked ahead of launch; availability + HOME transfer stay unknown until then.
   { releaseId: 'winds', label: 'Winds', platform: 'switch2', generation: 10, versionGroup: 'ww' },

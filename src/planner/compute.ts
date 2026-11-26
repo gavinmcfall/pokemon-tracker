@@ -1,5 +1,5 @@
-import type { AvailabilityEntry, EntryWithStatus, GameOwnership, OwnershipMethod } from '../types.js';
-import { BANK_RELEASE_ID, GAME_BY_ID, RELEASE_BY_ID } from '../obtainability/games.js';
+import type { AvailabilityEntry, EntryWithStatus, GameOwnership, Obtainability, OwnershipMethod } from '../types.js';
+import { BANK_RELEASE_ID, GAME_BY_ID, RELEASE_BY_ID, RELEASES_BY_GROUP } from '../obtainability/games.js';
 import { transferFor, type TransferInfo } from '../obtainability/transfer.js';
 
 export type { GameOwnership };
@@ -18,6 +18,10 @@ export type { GameOwnership };
  * Scarlet-only) is catchable only with one of those cartridges, so ids in
  * `needs`, acquisitions and itinerary steps may be a single release ('violet')
  * as well as a version group ('sv'). Transfer routes stay per group.
+ *
+ * Forms HOME can't store (`keptIn`: Black Kyurem, Arceus types, megas) never
+ * transfer: the goal is to hold them in a game save, so only the games whose
+ * saves can keep them count, and no HOME route (or Bank) is needed.
  */
 
 export type Verdict = 'have' | 'ready' | 'need-game' | 'unknown' | 'event-only';
@@ -109,7 +113,38 @@ export function groupOfId(id: string): string {
   return GAME_BY_ID.has(id) ? id : (RELEASE_BY_ID.get(id)?.versionGroup ?? id);
 }
 
-type CatchOption = Pick<AvailabilityEntry, 'gameId' | 'versions'>;
+type CatchOption = Pick<AvailabilityEntry, 'gameId' | 'versions'> & {
+  /** How a catch there ends up where the slot is kept (HOME, or a save). */
+  info: TransferInfo;
+};
+
+/**
+ * Where an entry can be caught and how it then reaches where it is kept:
+ * normally each available game plus its HOME transfer route; for a form HOME
+ * can't store, only the games whose saves keep it, narrowed to those
+ * cartridges, with no transfer at all.
+ */
+export function catchOptions(ob: Obtainability): CatchOption[] {
+  if (!ob.keptIn) return ob.availability.map((a) => ({ gameId: a.gameId, ...(a.versions ? { versions: a.versions } : {}), info: transferFor(a.gameId) }));
+  const kept = new Set(ob.keptIn.releases);
+  const what = ob.keptIn.kind === 'battle' ? 'the base form and its trigger item' : 'it';
+  const out: CatchOption[] = [];
+  for (const a of ob.availability) {
+    const all = RELEASES_BY_GROUP.get(a.gameId) ?? [];
+    const releases = (a.versions ?? all).filter((r) => kept.has(r));
+    if (!releases.length) continue;
+    const label = GAME_BY_ID.get(a.gameId)?.label ?? a.gameId;
+    out.push({
+      gameId: a.gameId,
+      ...(releases.length < all.length ? { versions: releases } : {}),
+      info: {
+        gameId: a.gameId, reach: 'native', directToHome: false, requiresBank: false, possible: true, requiresGames: [],
+        route: `Keep ${what} in a ${label} save (HOME can't store this form)`,
+      },
+    });
+  }
+  return out;
+}
 
 /** Can the owner catch this availability entry with what they play? */
 function canCatch(a: CatchOption, own: Owned): boolean {
@@ -178,7 +213,7 @@ const REACH_RANK: Record<string, number> = { native: 0, go: 1, bank: 2, chain: 3
 interface Routable { entryKey: string; options: CatchOption[] }
 
 const readyVia = (a: CatchOption, own: Owned, bank: boolean) =>
-  routeComplete(transferFor(a.gameId), canCatch(a, own), own.groups, bank);
+  routeComplete(a.info, canCatch(a, own), own.groups, bank);
 
 export function computePlan(input: PlanInput): Plan {
   const own: Owned = {
@@ -200,9 +235,10 @@ export function computePlan(input: PlanInput): Plan {
     if (ob.unobtainableLegit) { species.push({ entryKey: e.entryKey, dex: e.dex, verdict: 'event-only' }); summary.eventOnly += 1; continue; }
 
     // Ready? pick the simplest completable route.
+    const opts = catchOptions(ob);
     let readyInfo: TransferInfo | null = null;
-    for (const a of ob.availability) {
-      const info = transferFor(a.gameId);
+    for (const a of opts) {
+      const info = a.info;
       if (readyVia(a, own, bank) && (!readyInfo || (REACH_RANK[info.reach] ?? 9) < (REACH_RANK[readyInfo.reach] ?? 9))) {
         readyInfo = info;
       }
@@ -216,8 +252,8 @@ export function computePlan(input: PlanInput): Plan {
     // Not ready — cheapest missing route, if any is routable at all.
     let best: string[][] | null = null;
     const options: CatchOption[] = [];
-    for (const a of ob.availability) {
-      const info = transferFor(a.gameId);
+    for (const a of opts) {
+      const info = a.info;
       const miss = routeMissing(info, canCatch(a, own) ? null : catchNeed(a, own), own.groups, bank);
       if (miss === null) continue;
       options.push(a);
@@ -257,7 +293,7 @@ function planAcquisitions(blocked: Routable[], initialOwned: Owned, initialBank:
     for (const s of remaining) {
       for (const a of s.options) {
         if (!canCatch(a, owned)) for (const id of catchNeed(a, owned)) candidates.add(id);
-        for (const hop of transferFor(a.gameId).requiresGames) for (const g of hop) if (!owned.groups.has(g)) candidates.add(g);
+        for (const hop of a.info.requiresGames) for (const g of hop) if (!owned.groups.has(g)) candidates.add(g);
       }
     }
 
@@ -276,7 +312,7 @@ function planAcquisitions(blocked: Routable[], initialOwned: Owned, initialBank:
       // some route needs it, activate Bank as infrastructure (it may unlock 0 now
       // but lets the next round's game purchases count) — then retry. Otherwise done.
       const bankWouldHelp = !bank && remaining.some((s) => s.options.some((a) => {
-        const r = transferFor(a.gameId).reach;
+        const r = a.info.reach;
         return r === 'bank' || r === 'chain';
       }));
       if (!bankWouldHelp) break;
@@ -446,6 +482,7 @@ export function computeAcquisitionPlan(input: {
   const missing = input.entries.filter((e) => !e.status?.caught);
   const leftover: AcquireLeftover[] = [];
   const speciesGames = new Map<string, string[]>(); // entryKey -> candidate games (simplest tier)
+  const routeAt = new Map<string, Map<string, TransferInfo>>(); // entryKey -> stop id -> its route
 
   for (const e of missing) {
     const ob = e.obtainability;
@@ -453,15 +490,17 @@ export function computeAcquisitionPlan(input: {
     if (ob.unobtainableLegit) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'event-only' }); continue; }
     let minTier = 99;
     const byTier = new Map<number, Set<string>>();
-    for (const a of ob.availability) {
-      const t = tierOf(transferFor(a.gameId).reach);
+    const routes = new Map<string, TransferInfo>();
+    for (const a of catchOptions(ob)) {
+      const t = tierOf(a.info.reach);
       if (t === 99) continue;
       const tierSet = byTier.get(t) ?? byTier.set(t, new Set()).get(t)!;
-      for (const id of stopIdsFor(a, own)) tierSet.add(id);
+      for (const id of stopIdsFor(a, own)) { tierSet.add(id); if (!routes.has(id)) routes.set(id, a.info); }
       if (t < minTier) minTier = t;
     }
     if (minTier === 99) { leftover.push({ entryKey: e.entryKey, dex: e.dex, reason: 'no known route' }); continue; }
     speciesGames.set(e.entryKey, [...byTier.get(minTier)!]);
+    routeAt.set(e.entryKey, routes);
   }
 
   // Greedy set-cover: each round, the game catching the most still-uncovered species.
@@ -501,12 +540,16 @@ export function computeAcquisitionPlan(input: {
   let needBank = false;
   const prereqGames = new Set<string>();
   for (const stop of catchStops) {
-    const info = transferFor(groupOfId(stop.id));
-    if ((info.reach === 'bank' || info.reach === 'chain') && !hasBank) needBank = true;
-    if (info.reach === 'chain') {
-      for (const hop of info.requiresGames) {
-        const rep = hop[0];
-        if (rep && !hop.some((g) => own.groups.has(g))) prereqGames.add(rep);
+    // A stop's transfer needs only matter for the entries that transfer from
+    // it; a form kept in that game's save needs no Bank or chain.
+    for (const ek of stop.entryKeys) {
+      const info = routeAt.get(ek)?.get(stop.id) ?? transferFor(groupOfId(stop.id));
+      if ((info.reach === 'bank' || info.reach === 'chain') && !hasBank) needBank = true;
+      if (info.reach === 'chain') {
+        for (const hop of info.requiresGames) {
+          const rep = hop[0];
+          if (rep && !hop.some((g) => own.groups.has(g))) prereqGames.add(rep);
+        }
       }
     }
   }

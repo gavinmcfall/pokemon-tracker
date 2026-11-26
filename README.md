@@ -199,6 +199,12 @@ mock data + localStorage:
   **Mark transferred** per game; the detail sheet has an `In HOME / not in
   HOME` toggle. Releasing a catch resets the flag. Round-trips through CSV
   export/import (`inHome` column).
+- **Forms HOME can't store** (`obtainability.keptIn`, see pokepc below) are
+  tracked against a game save instead: the sheet explains why and asks which
+  save holds it (`status.heldIn`, a release id; `heldIn` CSV column), the
+  quick-tick records the stop's cartridge when it is one of those saves, and
+  they never join the transfer backlog. The planner only routes them to games
+  whose saves keep them, with no HOME transfer, so no Bank.
   A demand-based greedy set-cover reaches full coverage (handling the Gen-3→4→5→
   Bank chains a naïve greedy would stall on). Below the plan: per-species verdicts
   (**Have / Ready / Need-a-game / Unknown / Event-only**, `GET /api/plan`) with a
@@ -276,9 +282,11 @@ Policy encoded in `src/seed/expand.ts` (all unit-tested against real PokéAPI da
 - `is_cosmetic` = a sibling form that doesn't even change typing (Vivillon
   patterns yes; Arceus plates no). The effectively-unobtainable Poké Ball
   Vivillon is listed and flagged, per the "every variant" goal.
-- Battle-only sibling forms (Cherrim-Sunshine, Mimikyu-Busted, Castform
-  weather) are transient states, not slots — excluded. Battle-only *varieties*
-  (megas, gmax) are kept: they're explicitly wanted.
+- Battle-only sibling forms that PokéAPI models as forms of one variety
+  (Cherrim-Sunshine) are excluded. Battle-only and
+  fusion *varieties* (megas, gmax, Castform weather, Zen Darmanitan, Black
+  Kyurem, Ultra Necrozma…) are kept: they're explicitly wanted, and tracked
+  against a game save rather than HOME (see `keptIn` under Obtainability).
 - Costume/build varieties are included (inclusive by default — see open
   decisions). Totem varieties are not: HOME turns a Totem-sized Pokémon back
   into a normal one, so no living dex can hold one. The reasoning and sources
@@ -388,12 +396,39 @@ when the same form's pre-evolution is native there, else `available`.
   Genesect and Marshadow are GO-obtainable, while Zeraora, Zarude and Pecharunt
   stay event-only.
 - **Event-only:** a slot left with no native game is flagged `unobtainableLegit`.
+- **Where a form is kept** (`keptIn`). pokepc's `storableIn` says which saves
+  can hold a form, and `home` among them means Pokémon HOME can. When HOME
+  can't (Serebii's [undepositable list](https://www.serebii.net/pokemonhome/nondepositablepokemon.shtml)
+  and Bulbapedia's Pokémon HOME page agree), the slot gets
+  `keptIn: {kind, releases}`:
+  - `save`: fusions and held-item forms (Black/White Kyurem, Dusk Mane
+    Necrozma, the Calyrex riders, Arceus and Silvally types, Origin forms,
+    Crowned Zacian/Zamazenta, Ogerpon masks, Genesect drives). `releases` are
+    the cartridges whose save keeps it.
+  - `battle`: battle-only forms (megas, primals, gmax, Castform weather, Zen
+    Darmanitan, Ultra Necrozma, Eternamax…). What you keep is the base form plus
+    its trigger item, so `releases` are the cartridges that can trigger it
+    (plus any that keep it outside battle, like Castform weather in GO).
+  The generator keeps these records (it used to skip battle-only and fusion
+  forms), so megas and gmax now get pokepc's games too (Mega Absol Z: Z-A only).
+- **FireRed/LeafGreen on Switch** (`frlg-switch`, releases `firered-switch` /
+  `leafgreen-switch`): the 2026 eShop re-release, a separate game because only
+  it reaches HOME (one-way, HOME v4.1.0, 7 Oct 2026; whole Boxes, no held
+  items / HM moves / Eggs). pokepc lists it as the same cartridge as the GBA
+  one, so both get pokepc's FRLG availability and the Switch copy reuses the
+  GBA game's methods and locations. Its Mystic and Aurora Tickets are built in
+  (Lugia, Ho-Oh, Attack/Defense Deoxys); on the GBA cartridges those were
+  events, which `POKEPC_CORRECTIONS` removes.
 - **Overrides:**
   - `POKEPC_CORRECTIONS` in `curated.ts` holds hand-checked overrides: the
-    Paldean Tauros breeds are version exclusives.
+    Paldean Tauros breeds are version exclusives, and the GBA FRLG ticket
+    legendaries.
   - `EVENT_ONLY_FORMS` (cap Pikachu) is never re-based.
-  - Forms pokepc has no record of (megas, Gigantamax, cosplay Pikachu, Koraidon
-    modes) keep the mirror's answer.
+  - Forms pokepc has no record of (cosplay Pikachu, Koraidon/Miraidon modes)
+    keep the mirror's answer.
+- **Switch coverage:** `scripts/switch-coverage.ts` (read-only) groups every
+  entry by its best route — a Switch game or save, GO only, 3DS-or-older only,
+  or none — using what the next seed would write.
 - **Checking it:** `scripts/compare-pokepc.ts` diffs the live database, and what
   the next seed would write, against pokepc. It is read-only. After adoption only
   the cap Pikachu override differs. `docs/pokepc-comparison.md` is the
