@@ -3,16 +3,19 @@
 //
 //   git clone https://github.com/pokepc/dataset <dir>
 //   git -C <dir> checkout <commit>
-//   npx tsx scripts/update-pokepc.ts <dir>
+//   npx tsx scripts/update-pokepc.ts <dir> [changes.md]
 //
-// Then review the diff and re-run scripts/compare-pokepc.ts against the live DB.
+// changes.md gets one line per form whose availability changed. The weekly
+// workflow (.github/workflows/pokepc-update.yaml) puts it in its PR. Then
+// review the diff and re-run scripts/compare-pokepc.ts against the live DB.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { POKEPC_CARTRIDGES, pokepcSlugs, speciesPrefix } from '../src/obtainability/pokepc-slugs.js';
+import { POKEPC_RECORDS } from '../src/obtainability/pokepc-data.js';
 
-const dir = process.argv[2];
-if (!dir) throw new Error('usage: tsx scripts/update-pokepc.ts <pokepc-dataset-clone>');
+const [dir, changesFile] = process.argv.slice(2);
+if (!dir) throw new Error('usage: tsx scripts/update-pokepc.ts <pokepc-dataset-clone> [changes.md]');
 
 const commit = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const committed = execFileSync('git', ['-C', dir, 'log', '-1', '--format=%cs'], { encoding: 'utf8' }).trim();
@@ -34,7 +37,7 @@ interface PokepcRecord {
 const releases = (carts: string[] | undefined, skip: Set<string>): string =>
   [...new Set((carts ?? []).filter((c) => !skip.has(c)).map((c) => POKEPC_CARTRIDGES[c]).filter(Boolean))].join(' ');
 
-const rows = new Map<string, string>();
+const rows = new Map<string, [string, string]>();
 const aliases = new Map<string, string>();
 const files = readdirSync(join(dir, 'data', 'pokemon')).filter((f) => f.endsWith('.json')).sort();
 const all = files.map((f) => JSON.parse(readFileSync(join(dir, 'data', 'pokemon', f), 'utf8')) as PokepcRecord);
@@ -59,15 +62,32 @@ for (const d of records) {
   // version's exclusive), which the tracker does not count as native.
   const o = releases(d.obtainableIn, new Set(d.linkRequiredIn ?? []));
   const e = releases(d.eventOnlyIn, new Set());
-  rows.set(key, `[${JSON.stringify(o)}, ${JSON.stringify(e)}]`);
+  rows.set(key, [o, e]);
   if (alias) aliases.set(`${d.dexNum}:${alias}`, key);
 }
 for (const [alias, key] of aliases) if (!rows.has(alias)) rows.set(alias, rows.get(key)!);
 
 const body = [...rows.entries()]
   .sort(([a], [b]) => Number(a.split(':')[0]) - Number(b.split(':')[0]) || a.localeCompare(b))
-  .map(([k, v]) => `  ${JSON.stringify(k)}: ${v},`)
+  .map(([k, [o, e]]) => `  ${JSON.stringify(k)}: [${JSON.stringify(o)}, ${JSON.stringify(e)}],`)
   .join('\n');
+
+// What changed against the vendored data, one line per form, for review.
+const words = (s: string | undefined) => new Set(s ? s.split(' ') : []);
+const delta = (label: string, before: string | undefined, after: string | undefined): string[] => {
+  const b = words(before), a = words(after);
+  const added = [...a].filter((r) => !b.has(r)), removed = [...b].filter((r) => !a.has(r));
+  return [...(added.length ? [`${label} +${added.join(' +')}`] : []), ...(removed.length ? [`${label} -${removed.join(' -')}`] : [])];
+};
+const changes: string[] = [];
+for (const key of [...new Set([...Object.keys(POKEPC_RECORDS), ...rows.keys()])].sort()) {
+  const before = POKEPC_RECORDS[key], after = rows.get(key);
+  if (!after) { changes.push(`- \`${key}\`: removed from pokepc`); continue; }
+  const parts = [...delta('native', before?.[0], after[0]), ...delta('event-only', before?.[1], after[1])];
+  if (!before) parts.unshift('new form');
+  if (parts.length) changes.push(`- \`${key}\`: ${parts.join('; ')}`);
+}
+if (changesFile) writeFileSync(changesFile, changes.length ? `${changes.join('\n')}\n` : '');
 
 writeFileSync(
   join(import.meta.dirname, '..', 'src', 'obtainability', 'pokepc-data.ts'),
@@ -86,4 +106,4 @@ ${body}
 };
 `,
 );
-console.log(`pokepc-data.ts: ${rows.size} keys from ${records.length} records at ${commit}`);
+console.log(`pokepc-data.ts: ${rows.size} keys from ${records.length} records at ${commit}; ${changes.length} forms changed`);
