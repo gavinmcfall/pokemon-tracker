@@ -5,6 +5,8 @@ import type { Entry, Obtainability } from '../types.js';
 import { PokeApiClient, mapLimit, type RawForm, type RawPokemon } from './pokeapi.js';
 import { expandSpecies, includedVarieties, neededForms } from './expand.js';
 import { obtainabilityWithFormsFromMirror } from '../obtainability/from-mirror.js';
+import { applyPokepc } from '../obtainability/pokepc.js';
+import { POKEPC_COMMIT } from '../obtainability/pokepc-data.js';
 
 /**
  * Seed job (spec §5): idempotent upsert of the full entry catalogue from
@@ -77,11 +79,14 @@ async function main(): Promise<void> {
   await mirrorClient.connect();
   try {
     // Regional forms get their own record (byForm); everything else the species'.
+    // pokepc then decides which games/cartridges have each form.
     const { byDex, byForm } = await obtainabilityWithFormsFromMirror(mirrorClient, mirrorSchema);
-    obtainabilityRecords = entries
-      .map((e) => ({ entryKey: e.entryKey, obtainability: byForm.get(`${e.dex}:${e.formSlug}`) ?? byDex.get(e.dex) }))
-      .filter((r): r is { entryKey: string; obtainability: Obtainability } => r.obtainability !== undefined);
-    console.log(`seed: obtainability sourced from mirror (${mirrorSchema}) for ${byDex.size} species`);
+    obtainabilityRecords = [];
+    for (const e of entries) {
+      const ob = byForm.get(`${e.dex}:${e.formSlug}`) ?? byDex.get(e.dex);
+      if (ob) obtainabilityRecords.push({ entryKey: e.entryKey, obtainability: applyPokepc(e.dex, e.formSlug, ob) });
+    }
+    console.log(`seed: obtainability sourced from mirror (${mirrorSchema}) for ${byDex.size} species, pokepc ${POKEPC_COMMIT.slice(0, 7)}`);
   } catch (err) {
     console.warn(`seed: obtainability skipped — mirror "${mirrorSchema}" not available (${String(err).slice(0, 140)}). Run the pokeapi-mirror job, then re-seed.`);
   } finally {

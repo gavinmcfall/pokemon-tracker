@@ -74,6 +74,11 @@ export function ownDirectlyObtainableGames(dex: number, wildGameIds: Iterable<st
   return games;
 }
 
+/** Whether a shiny of this species can be obtained in this game. */
+export function shinyPossibleIn(dex: number, gameId: string): boolean {
+  return !SHINY_LOCKED_EVERYWHERE.has(dex) && !STATIC_SHINY_LOCK[gameId]?.includes(dex);
+}
+
 /** A candidate way a slot is obtainable in a game, before dedup. */
 export interface ObtainSource {
   gameId: string;
@@ -127,9 +132,8 @@ export function computeObtainabilityFromSources(input: SourcedInput): Obtainabil
     .sort(([a], [b]) => byReleaseOrder(a, b))
     .map(([gameId, { method, locations, versions }]) => {
       const meta = GAME_BY_ID.get(gameId)!;
-      const shinyPossible = !shinyLockedEverywhere && !(STATIC_SHINY_LOCK[gameId]?.includes(dex));
       return {
-        gameId, label: meta.label, platform: meta.platform, method, shinyPossible,
+        gameId, label: meta.label, platform: meta.platform, method, shinyPossible: shinyPossibleIn(dex, gameId),
         ...(locations.length ? { locations: locations.slice(0, MAX_LOCATIONS) } : {}),
         ...(versions ? { versions } : {}),
       };

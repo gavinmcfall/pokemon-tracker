@@ -60,6 +60,26 @@ export const EVENT_ONLY_FORMS = new Set<string>([
 export const NON_DEX_VARIETY_SEGMENTS = new Set<string>(['totem']);
 
 /**
+ * Hand-checked corrections to pokepc/dataset (see pokepc.ts), keyed
+ * `${dex}:${formSlug}` → gameId → the cartridges that really have it natively
+ * ([] = none). Replaces pokepc's answer for that game only.
+ *
+ * Checked 2026-11-26 alongside these cases where pokepc was right and the
+ * tracker wrong (no correction needed): Platinum Spiritomb and Emerald Surskit
+ * need other players (Underground / record-mixing swarms); Platinum Murkrow,
+ * Misdreavus, Glameow, Stunky are trade-only; Scarlet Gulpin comes from Jacq's
+ * League Club trade; Z-A has Meadow, Marine (museum Spewpa) and Garden
+ * Vivillon; SV only Fancy; Dusk Lycanroc was a USUM event; SV has no regular
+ * Ursaluna.
+ */
+export const POKEPC_CORRECTIONS: Record<string, Record<string, string[]>> = {
+  // Paldean Tauros breeds are version exclusives; pokepc lists both versions.
+  // https://www.serebii.net/pokedex-sv/tauros/
+  '128:paldea_blaze_breed': { sv: ['scarlet'] },
+  '128:paldea_aqua_breed': { sv: ['violet'] },
+};
+
+/**
  * Species with no in-game catch/gift path in ANY currently-playable game —
  * event-only distributions (and, for Magearna, a HOME reward). These render as
  * "event-only" in the planner rather than pretending to be catchable. Each has
