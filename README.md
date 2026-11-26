@@ -279,8 +279,11 @@ Policy encoded in `src/seed/expand.ts` (all unit-tested against real PokéAPI da
 - Battle-only sibling forms (Cherrim-Sunshine, Mimikyu-Busted, Castform
   weather) are transient states, not slots — excluded. Battle-only *varieties*
   (megas, gmax) are kept: they're explicitly wanted.
-- Totem/costume/build varieties are included (inclusive by default — see open
-  decisions).
+- Costume/build varieties are included (inclusive by default — see open
+  decisions). Totem varieties are not: HOME turns a Totem-sized Pokémon back
+  into a normal one, so no living dex can hold one. The reasoning and sources
+  are kept on `NON_DEX_VARIETY_SEGMENTS` in `src/obtainability/curated.ts` in
+  case that ever changes.
 
 Operationally: ≤8 concurrent requests, retry/backoff honoring `Retry-After`,
 and every response cached on disk (`SEED_CACHE_DIR`, a PVC in-cluster), so
@@ -479,6 +482,7 @@ Gateway parentRef, image tags), reconcile, then apply the one-shot seed Job.
 4. **Exposure**: manifests default to the internal (LAN) Gateway; switching to
    the Cloudflare-Tunnel gateway is a one-line `parentRefs` change.
 5. **Seed tier**: `full` (every gender, every variant) as specified.
-6. **Inclusivity of odd variants** (new): totem and costume-cap Pikachu
-   varieties are *included* since PokéAPI lists them and the goal is "every
-   variant" — easy to exclude with a filter in `expand.ts` if unwanted.
+6. **Inclusivity of odd variants**: costume-cap Pikachu varieties are
+   *included* since PokéAPI lists them and the goal is "every variant" (they
+   are flagged event-only). Totem varieties were dropped on 2026-11-26 — see
+   `NON_DEX_VARIETY_SEGMENTS`.

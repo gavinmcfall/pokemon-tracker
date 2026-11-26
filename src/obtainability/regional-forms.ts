@@ -40,11 +40,16 @@ export const REGIONAL_FORMS_BY_GAME: Readonly<Record<string, GameForms>> = {
   // Legends: Arceus (Daybreak added no forms). Hisuian forms replace the
   // original — "If caught in Hisui, it will have its Hisuian Form" — except
   // Sneasel, whose original form is in Obsidian space-time distortions.
-  // No Alolan/Galarian/Paldean forms.
+  // The only other regional form is Alolan Vulpix, a request gift (added
+  // 2026-11-26 after pokepc/dataset flagged it), which evolves into Alolan
+  // Ninetales. No Galarian/Paldean forms.
   // https://www.serebii.net/legendsarceus/hisuipokedex.shtml
   // https://pokemondb.net/pokedex/game/legends-arceus
   // https://www.serebii.net/pokedex-swsh/sneasel/
+  // https://serebii.net/legendsarceus/requests/snow-whitevulpixinthesnow.shtml
   pla: {
+    37: { default: {}, alola: { method: 'gift', locations: ['Request: Snow-White Vulpix in the Snow (Keaka)'] } },
+    38: { default: {}, alola: { method: 'evolve', locations: ['Evolve Alolan Vulpix (Ice Stone)'] } },
     58: hisuiOnly, 59: hisuiOnly, 100: hisuiOnly, 101: hisuiOnly, 157: hisuiOnly,
     211: hisuiOnly, 503: hisuiOnly, 549: hisuiOnly, 570: hisuiOnly, 571: hisuiOnly,
     628: hisuiOnly, 705: hisuiOnly, 706: hisuiOnly, 713: hisuiOnly, 724: hisuiOnly,
@@ -57,7 +62,10 @@ export const REGIONAL_FORMS_BY_GAME: Readonly<Record<string, GameForms>> = {
   // Scarlet/Violet + The Teal Mask + The Indigo Disk. Regional forms come from
   // the Blueberry Pokédex (form-suffixed sprites) and the Paldea Pokédex
   // (Paldean Wooper/Tauros); Kitakami has none. Not listed = transfer-only
-  // (e.g. Alolan Raichu, every Hisuian form but Qwilfish).
+  // (e.g. Alolan Raichu, every Hisuian form but Qwilfish and Growlithe).
+  // Hisuian Growlithe: Perrin's gift after her Teal Mask photography quest
+  // (added 2026-11-26 after pokepc/dataset flagged it).
+  // https://www.nintendolife.com/guides/pokemon-scarlet-and-violet-how-to-get-hisuian-growlithe-in-the-teal-mask-dlc
   // https://www.serebii.net/scarletviolet/blueberrypokedex.shtml
   // https://www.serebii.net/scarletviolet/paldeapokedex.shtml
   // https://www.serebii.net/scarletviolet/kitakamipokedex.shtml
@@ -78,6 +86,8 @@ export const REGIONAL_FORMS_BY_GAME: Readonly<Record<string, GameForms>> = {
       galar: { method: 'gift', locations: ['Salvatore, after the language final'] },
     },
     53: { default: {}, alola: { method: 'evolve', locations: ['Evolve Alolan Meowth (friendship)'] } },
+    58: { default: {}, hisui: { method: 'gift', locations: ['Perrin, Mossui Town (after her photography quest, The Teal Mask)'] } },
+    59: { default: {}, hisui: { method: 'evolve', locations: ['Evolve Hisuian Growlithe (Fire Stone)'] } },
     74: { default: {}, alola: { method: 'wild', locations: ['Canyon Biome (Terarium)', 'Chargestone Cavern'] } },
     75: { default: {}, alola: { method: 'wild', locations: ['Canyon Biome (Terarium)', 'Chargestone Cavern'] } },
     76: { default: {}, alola: { method: 'evolve', locations: ['Trade-evolve Alolan Graveler'] } },

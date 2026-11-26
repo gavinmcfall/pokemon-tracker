@@ -18,7 +18,9 @@ describe('curated regional forms', () => {
     expect(curatedForm('pla', 58, 'hisui')).toEqual({});
     expect(curatedForm('pla', 215, 'default')).toMatchObject({ method: 'wild' });
     expect(curatedForm('pla', 215, 'hisui')).toMatchObject({ method: 'wild' });
-    expect(curatedForm('pla', 37, 'alola')).toBeNull(); // Kantonian Vulpix only
+    expect(curatedForm('pla', 37, 'default')).toEqual({});
+    expect(curatedForm('pla', 37, 'alola')).toMatchObject({ method: 'gift' }); // Snow-White Vulpix request
+    expect(curatedForm('pla', 26, 'alola')).toBeNull();
   });
 
   it('Scarlet/Violet: Indigo Disk forms with their version exclusives; transfer-only forms absent', () => {
@@ -27,7 +29,8 @@ describe('curated regional forms', () => {
     expect(curatedForm('sv', 128, 'paldea_aqua_breed')).toMatchObject({ versions: ['violet'] });
     expect(curatedForm('sv', 26, 'alola')).toBeNull();
     expect(curatedForm('sv', 26, 'default')).toEqual({});
-    expect(curatedForm('sv', 58, 'hisui')).toBeNull();
+    expect(curatedForm('sv', 58, 'hisui')).toMatchObject({ method: 'gift' }); // Perrin, The Teal Mask
+    expect(curatedForm('sv', 100, 'hisui')).toBeNull();
   });
 
   it('only uses form slugs the seed produces and release ids that exist', () => {

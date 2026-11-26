@@ -43,6 +43,23 @@ export const EVENT_ONLY_FORMS = new Set<string>([
 ]);
 
 /**
+ * PokéAPI variety-name segments that are NOT living-dex slots, so the seed
+ * makes no entries for them (`raticate-totem-alola`, `mimikyu-totem-busted`).
+ *
+ * Totem-sized Pokémon: the only way to keep one is Ultra Sun/Ultra Moon's
+ * Totem Sticker rewards from Samson Oak (6 per version, no Wishiwashi). They
+ * travel to Bank and HOME, but HOME turns them into normal-sized Pokémon with
+ * no marker, and they are not separate Pokédex forms (Bulbapedia; PokémonDB
+ * and Serebii's HOME list have no totem entries; pokepc/dataset has none).
+ * Checked 2026-11-26. If HOME ever keeps totem size, remove 'totem' here and
+ * give them USUM gift availability:
+ *   https://pokemondb.net/ultra-sun-ultra-moon/totems
+ *   https://www.serebii.net/ultrasunultramoon/totemstickers.shtml
+ *   https://nintendosoup.com/?p=262370
+ */
+export const NON_DEX_VARIETY_SEGMENTS = new Set<string>(['totem']);
+
+/**
  * Species with no in-game catch/gift path in ANY currently-playable game —
  * event-only distributions (and, for Magearna, a HOME reward). These render as
  * "event-only" in the planner rather than pretending to be catchable. Each has
