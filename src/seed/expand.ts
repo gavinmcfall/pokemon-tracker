@@ -1,6 +1,6 @@
 import type { Entry, Gender, SeedTier } from '../types.js';
 import { entryKeyOf } from '../types.js';
-import { FIXED_GENDER_FORMS } from '../obtainability/curated.js';
+import { FIXED_GENDER_FORMS, NON_DEX_VARIETY_SEGMENTS } from '../obtainability/curated.js';
 import type { RawForm, RawPokemon, RawSpecies } from './pokeapi.js';
 
 /**
@@ -28,9 +28,10 @@ export function isRegionalVariety(varietyName: string): boolean {
   return varietyName.split('-').some((segment) => REGIONAL_SEGMENTS.has(segment));
 }
 
-/** Which of a species' varieties become entries at this tier. */
+/** Which of a species' varieties become entries at this tier (never totems — see NON_DEX_VARIETY_SEGMENTS). */
 export function includedVarieties(species: RawSpecies, tier: SeedTier): { name: string; isDefault: boolean }[] {
   return species.varieties
+    .filter((v) => !v.pokemon.name.split('-').some((segment) => NON_DEX_VARIETY_SEGMENTS.has(segment)))
     .filter((v) => v.is_default || tier !== 'species' || isRegionalVariety(v.pokemon.name))
     .map((v) => ({ name: v.pokemon.name, isDefault: v.is_default }));
 }

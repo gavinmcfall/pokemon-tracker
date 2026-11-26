@@ -159,6 +159,14 @@ describe('expandSpecies on real PokéAPI fixtures (spec §8 edge cases)', () => 
     expect(slugs.has('mimikyu_busted')).toBe(false);
   });
 
+  it('Totem-sized varieties are not dex slots (HOME turns them back into normal size)', () => {
+    for (const tier of ['species', 'forms', 'full'] as const) {
+      const slugs = expandSpecies(bundleFor('mimikyu', tier), tier).map((e) => e.formSlug);
+      expect(slugs.filter((s) => s.includes('totem'))).toEqual([]);
+      expect(slugs).toContain('default');
+    }
+  });
+
   it('Pichu: empty-form_name base becomes a real default slot, not a "pichu" cosmetic form', () => {
     expect(keys('pichu')).toEqual([
       '0172-default-female', '0172-default-male',
