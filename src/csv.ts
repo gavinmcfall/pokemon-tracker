@@ -1,5 +1,6 @@
 import type { EntryWithStatus, Gender, StatusPatch } from './types.js';
 import { entryKeyOf } from './types.js';
+import { RELEASE_BY_ID } from './obtainability/games.js';
 
 /** Minimal RFC 4180 parser: quoted fields, escaped quotes, CRLF/LF, trailing newline. */
 export function parseCsv(text: string): string[][] {
@@ -39,7 +40,7 @@ export function serializeCsv(rows: string[][]): string {
 
 export const EXPORT_COLUMNS = [
   'entryKey', 'dex', 'name', 'formSlug', 'formLabel', 'gender', 'types',
-  'generation', 'caught', 'caughtAt', 'gameOrigin', 'method', 'notes', 'inHome',
+  'generation', 'caught', 'caughtAt', 'gameOrigin', 'method', 'notes', 'inHome', 'heldIn',
 ] as const;
 
 /** Canonical export; POST /api/import accepts this format back unchanged (round-trip). */
@@ -61,6 +62,7 @@ export function exportCsv(entries: EntryWithStatus[]): string {
       e.status?.method ?? '',
       e.status?.notes ?? '',
       e.status ? (e.status.inHome ? 'true' : 'false') : '',
+      e.status?.heldIn ?? '',
     ]);
   }
   return serializeCsv(rows);
@@ -120,6 +122,8 @@ const HEADER_ALIASES: Record<string, string> = {
   inhome: 'inHome',
   home: 'inHome',
   transferred: 'inHome',
+  heldin: 'heldIn',
+  save: 'heldIn',
 };
 
 function parseGender(raw: string): Gender | null {
@@ -229,6 +233,10 @@ export function planImport(text: string, allEntries: { entryKey: string; dex: nu
         if (TRUTHY.has(v)) patch.inHome = true;
         else if (FALSY.has(v)) patch.inHome = false;
       }
+      const heldIn = cell(row, 'heldIn');
+      // Only a real game release (not a service); anything else is ignored.
+      const save = heldIn ? RELEASE_BY_ID.get(heldIn) : undefined;
+      if (save && save.platform !== 'service') patch.heldIn = save.releaseId;
       plan.patches.push(patch);
     }
   }

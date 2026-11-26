@@ -2,7 +2,7 @@ import pg from 'pg';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { AvailabilityEntry, Entry, EntryFilters, EntryWithStatus, EvolveFrom, GameOwnership, GameOwnershipPatch, Ivs, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
+import type { AvailabilityEntry, Entry, EntryFilters, EntryWithStatus, EvolveFrom, GameOwnership, GameOwnershipPatch, Ivs, KeptIn, Specimen, SpecimenInput, Status, StatusPatch, Summary } from '../types.js';
 import { OWNERSHIP_METHODS } from '../types.js';
 import { isEmptyOwnership, normalizeSpecimen, type ObtainabilityRecord, type SyncResult, type Store, type UpsertResult } from './store.js';
 
@@ -25,6 +25,7 @@ interface EntryRow {
   s_method: string | null;
   s_notes: string | null;
   s_in_home: boolean | null;
+  s_held_in: string | null;
   sp_entry_key: string | null;
   sp_shiny: boolean | null;
   sp_event: boolean | null;
@@ -51,6 +52,7 @@ interface EntryRow {
   ob_shiny_locked_in: string[] | null;
   ob_origin_games: string[] | null;
   ob_evolve_from: EvolveFrom | null;
+  ob_kept_in: KeptIn | null;
 }
 
 function rowToEntry(row: EntryRow): EntryWithStatus {
@@ -73,6 +75,7 @@ function rowToEntry(row: EntryRow): EntryWithStatus {
       method: row.s_method,
       notes: row.s_notes,
       inHome: row.s_in_home ?? true,
+      heldIn: row.s_held_in,
     },
     specimen: row.sp_entry_key === null ? null : {
       entryKey: row.sp_entry_key,
@@ -102,6 +105,7 @@ function rowToEntry(row: EntryRow): EntryWithStatus {
       shinyLockedIn: row.ob_shiny_locked_in ?? [],
       originGames: row.ob_origin_games ?? [],
       evolveFrom: row.ob_evolve_from ?? null,
+      keptIn: row.ob_kept_in ?? null,
     },
   };
 }
@@ -119,7 +123,7 @@ const BASE_SELECT = `
          e.types, e.generation, e.sprite_url, e.is_cosmetic,
          s.caught as s_caught, s.caught_at as s_caught_at,
          s.game_origin as s_game_origin, s.method as s_method, s.notes as s_notes,
-         s.in_home as s_in_home,
+         s.in_home as s_in_home, s.held_in as s_held_in,
          sp.entry_key as sp_entry_key, sp.shiny as sp_shiny, sp.event as sp_event,
          sp.level as sp_level, sp.origin_game as sp_origin_game, sp.met_year as sp_met_year,
          sp.iv_perfect as sp_iv_perfect, sp.ivs as sp_ivs, sp.tera as sp_tera,
@@ -132,7 +136,7 @@ const BASE_SELECT = `
          ob.unobtainable_legit as ob_unobtainable_legit,
          ob.gender_visual_diff as ob_gender_visual_diff,
          ob.shiny_locked_in as ob_shiny_locked_in, ob.origin_games as ob_origin_games,
-         ob.evolve_from as ob_evolve_from
+         ob.evolve_from as ob_evolve_from, ob.kept_in as ob_kept_in
   from entries e
   left join status s using (entry_key)
   left join specimen sp using (entry_key)
@@ -287,11 +291,12 @@ export class PgStore implements Store {
     const res = await this.pool.query<{
       entry_key: string; caught: boolean; caught_at: Date | null;
       game_origin: string | null; method: string | null; notes: string | null; in_home: boolean;
+      held_in: string | null;
     }>(
-      `insert into status (entry_key, caught, caught_at, game_origin, method, notes, in_home)
+      `insert into status (entry_key, caught, caught_at, game_origin, method, notes, in_home, held_in)
        select $1, $2,
               case when $2 then now() end,
-              $3::text, $4::text, $5::text, $9::boolean
+              $3::text, $4::text, $5::text, $9::boolean, $11::text
        where exists (select 1 from entries where entry_key = $1)
        on conflict (entry_key) do update set
          caught = excluded.caught,
@@ -308,8 +313,13 @@ export class PgStore implements Store {
            when $10 then excluded.in_home
            else status.in_home
          end,
+         held_in = case
+           when not excluded.caught then null
+           when $12 then excluded.held_in
+           else status.held_in
+         end,
          updated_at = now()
-       returning entry_key, caught, caught_at, game_origin, method, notes, in_home`,
+       returning entry_key, caught, caught_at, game_origin, method, notes, in_home, held_in`,
       [
         patch.entryKey,
         patch.caught,
@@ -321,6 +331,8 @@ export class PgStore implements Store {
         patch.notes !== undefined,
         patch.caught ? (patch.inHome ?? true) : true,
         patch.inHome !== undefined,
+        patch.caught ? (patch.heldIn ?? null) : null,
+        patch.heldIn !== undefined,
       ],
     );
     const row = res.rows[0];
@@ -333,6 +345,7 @@ export class PgStore implements Store {
       method: row.method,
       notes: row.notes,
       inHome: row.in_home,
+      heldIn: row.held_in,
     };
   }
 
@@ -412,18 +425,19 @@ export class PgStore implements Store {
         await client.query(
           `insert into obtainability
              (entry_key, availability, gmax_capable, tera_available, catchable_on_switch,
-              shiny_legal_somewhere, unobtainable_legit, gender_visual_diff, shiny_locked_in, origin_games, evolve_from)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+              shiny_legal_somewhere, unobtainable_legit, gender_visual_diff, shiny_locked_in, origin_games, evolve_from, kept_in)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
            on conflict (entry_key) do update set
              availability=excluded.availability, gmax_capable=excluded.gmax_capable,
              tera_available=excluded.tera_available, catchable_on_switch=excluded.catchable_on_switch,
              shiny_legal_somewhere=excluded.shiny_legal_somewhere, unobtainable_legit=excluded.unobtainable_legit,
              gender_visual_diff=excluded.gender_visual_diff, shiny_locked_in=excluded.shiny_locked_in,
-             origin_games=excluded.origin_games, evolve_from=excluded.evolve_from`,
+             origin_games=excluded.origin_games, evolve_from=excluded.evolve_from, kept_in=excluded.kept_in`,
           [
             entryKey, JSON.stringify(o.availability), o.gmaxCapable, o.teraAvailable, o.catchableOnSwitch,
             o.shinyLegalSomewhere, o.unobtainableLegit, o.genderVisualDiff, o.shinyLockedIn, o.originGames,
             o.evolveFrom === undefined || o.evolveFrom === null ? null : JSON.stringify(o.evolveFrom),
+            o.keptIn ? JSON.stringify(o.keptIn) : null,
           ],
         );
         seen.add(entryKey);

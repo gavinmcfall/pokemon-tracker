@@ -65,6 +65,7 @@ export const TRANSFER_BY_GAME: Record<string, TransferInfo> = {
   bdsp: { gameId: 'bdsp', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'Brilliant Diamond/Shining Pearl → HOME' },
   pla: { gameId: 'pla', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'Legends: Arceus → HOME' },
   sv: { gameId: 'sv', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'Scarlet/Violet → HOME' },
+  'frlg-switch': { gameId: 'frlg-switch', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'FireRed/LeafGreen (Switch) → HOME', note: 'One-way, a whole Box at a time (HOME v4.1.0+). Boxes with held items, HM moves or Eggs are refused; one-per-save Pokémon (legendaries, gifts) send once per save' },
   za: { gameId: 'za', reach: 'native', directToHome: true, requiresBank: false, possible: true, requiresGames: [], route: 'Legends: Z-A → HOME', note: 'HOME-native since HOME v4.0.0 — but one-way: a Pokémon that has entered Z-A cannot return to earlier games' },
 
   // ---- Gen 10 (Switch 2, upcoming): not released, no HOME support yet -------

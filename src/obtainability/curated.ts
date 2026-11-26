@@ -77,6 +77,15 @@ export const POKEPC_CORRECTIONS: Record<string, Record<string, string[]>> = {
   // https://www.serebii.net/pokedex-sv/tauros/
   '128:paldea_blaze_breed': { sv: ['scarlet'] },
   '128:paldea_aqua_breed': { sv: ['violet'] },
+  // pokepc's FireRed/LeafGreen is the Switch re-release, which builds in the
+  // Mystic Ticket (Lugia, Ho-Oh at Navel Rock) and Aurora Ticket (Deoxys at
+  // Birth Island). On the GBA cartridges those tickets were event
+  // distributions only. https://www.serebii.net/fireredleafgreen/compatibility.shtml
+  // https://bulbapedia.bulbagarden.net/wiki/Mystic_Ticket
+  '249:default': { frlg: [] },
+  '250:default': { frlg: [] },
+  '386:attack': { frlg: [] },
+  '386:defense': { frlg: [] },
 };
 
 /**

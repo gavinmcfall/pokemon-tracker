@@ -1,4 +1,4 @@
-import type { AvailabilityEntry, Obtainability } from '../types.js';
+import type { AvailabilityEntry, KeptIn, Obtainability } from '../types.js';
 import { GAMES, RELEASES_BY_GROUP, RELEASE_BY_ID, SWITCH_GAME_IDS } from './games.js';
 import { EVENT_ONLY_FORMS, POKEPC_CORRECTIONS, STATIC_SHINY_LOCK } from './curated.js';
 import { shinyPossibleIn } from './compute.js';
@@ -19,13 +19,21 @@ import { POKEPC_CARTRIDGES } from './pokepc-slugs.js';
  */
 
 /** Games pokepc covers; any other game (Winds/Waves) keeps the mirror's answer. */
-const POKEPC_GAME_IDS = new Set(Object.values(POKEPC_CARTRIDGES).map((r) => RELEASE_BY_ID.get(r)!.versionGroup));
+const POKEPC_GAME_IDS = new Set(Object.values(POKEPC_CARTRIDGES).flat().map((r) => RELEASE_BY_ID.get(r)!.versionGroup));
+
+/**
+ * Re-releases that play the same game as an older one: their methods and
+ * locations come from that game's record (the mirror only knows the GBA one).
+ */
+const SAME_GAME_AS: Record<string, string> = { 'frlg-switch': 'frlg' };
 
 export interface PokepcAvailability {
   /** Native release ids per game (link-trade-only cartridges removed). */
   native: Map<string, string[]>;
   /** Release ids where the only native source was an event. */
   eventOnly: string[];
+  /** Where the form lives when HOME can't store it; null when HOME can. */
+  keptIn: KeptIn | null;
 }
 
 const split = (s: string): string[] => (s ? s.split(' ') : []);
@@ -50,7 +58,21 @@ export function pokepcAvailability(dex: number, formSlug: string): PokepcAvailab
     if (releases.length) native.set(gameId, [...releases]);
     else native.delete(gameId);
   }
-  return { native, eventOnly: split(rec[1]) };
+  return { native, eventOnly: split(rec[1]), keptIn: keptIn(rec[2], native) };
+}
+
+/**
+ * The storage column: `save:<releases>` or `battle[:<releases>]`. A
+ * battle-only form can be held (as base form + trigger item) in any game that
+ * triggers it, plus any listed save that keeps it outside battle (GO).
+ */
+function keptIn(storage: string | undefined, native: Map<string, string[]>): KeptIn | null {
+  if (!storage) return null;
+  const [kind, held = ''] = storage.split(':') as ['save' | 'battle', string?];
+  const releases = new Set(split(held));
+  if (kind === 'battle') for (const rs of native.values()) for (const r of rs) releases.add(r);
+  const order = [...RELEASE_BY_ID.keys()];
+  return { kind, releases: [...releases].sort((a, b) => order.indexOf(a) - order.indexOf(b)) };
 }
 
 /**
@@ -67,6 +89,10 @@ export function applyPokepc(dex: number, formSlug: string, ob: Obtainability): O
   if (!pp) return ob;
 
   const prior = new Map(ob.availability.map((a) => [a.gameId, a]));
+  for (const [game, same] of Object.entries(SAME_GAME_AS)) {
+    const had = prior.get(same);
+    if (had && !prior.has(game)) prior.set(game, had);
+  }
   // Same form only: Alolan Ninetales evolves from Alolan Vulpix, but nothing
   // evolves into Eternal Floette.
   const pre = ob.evolveFrom ? pokepcAvailability(ob.evolveFrom.dex, formSlug) : null;
@@ -104,5 +130,6 @@ export function applyPokepc(dex: number, formSlug: string, ob: Obtainability): O
     shinyLockedIn: availability.filter((a) => STATIC_SHINY_LOCK[a.gameId]?.includes(dex)).map((a) => a.gameId),
     // No native game left: only events (or transfers) ever had it.
     unobtainableLegit: availability.length === 0,
+    keptIn: pp.keptIn,
   };
 }

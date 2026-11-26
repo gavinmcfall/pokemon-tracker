@@ -50,6 +50,25 @@ describe('planner: ownedRouteGroups + hasBank', () => {
   });
 });
 
+describe('planner: forms HOME cannot store', () => {
+  it('routes them to a save that keeps them, with no Bank or transfer', () => {
+    // Black Kyurem: made in Black 2 or Sword/Shield, kept only in the SwSh save.
+    const black = ob(['b2w2', 'swsh'], { keptIn: { kind: 'save', releases: ['sword', 'shield'] } });
+    let v = verdicts([entry(646, { ob: black })], ['b2w2'], true);
+    expect(v.get('0646-default-male')!.verdict).toBe('need-game');
+    expect(v.get('0646-default-male')!.needs).toEqual([['swsh']]);
+    v = verdicts([entry(646, { ob: black })], ['swsh'], false);
+    expect(v.get('0646-default-male')).toMatchObject({ verdict: 'ready', via: 'swsh' });
+    expect(v.get('0646-default-male')!.route).toMatch(/save/);
+  });
+
+  it('a battle-only form kept only in a 3DS game needs no Bank', () => {
+    const ultra = ob(['usum'], { keptIn: { kind: 'battle', releases: ['ultra-sun', 'ultra-moon'] } });
+    const v = verdicts([entry(800, { ob: ultra })], ['usum'], false);
+    expect(v.get('0800-default-male')!.verdict).toBe('ready');
+  });
+});
+
 describe('planner: per-species verdicts', () => {
   it('classifies have / unknown / event-only', () => {
     const v = verdicts([

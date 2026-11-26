@@ -28,6 +28,9 @@ export interface Status {
    *  awaiting transfer (the planner's transfer backlog). Meaningless when
    *  not caught (kept true). */
   inHome: boolean;
+  /** For a form HOME can't store (`Obtainability.keptIn`): the release id of
+   *  the game save that holds it (`'scarlet'`). Null otherwise / not yet set. */
+  heldIn?: string | null;
 }
 
 /** IV spread (0..31 each). */
@@ -105,6 +108,19 @@ export interface EvolveFrom {
 }
 
 /**
+ * Where a form HOME can't store has to live instead (pokepc `storableIn`).
+ * `save`: fusions and held-item forms (Black Kyurem, Arceus types, Crowned
+ * Zacian) — kept in one of `releases`' saves. `battle`: battle-only forms
+ * (megas, Castform weather) — tracked as the base form plus its trigger item
+ * in one of `releases`' saves (the games that can trigger it, plus any that
+ * keep it outside battle).
+ */
+export interface KeptIn {
+  kind: 'save' | 'battle';
+  releases: string[];
+}
+
+/**
  * Where/how a slot can be legitimately obtained + shiny/mechanic flags.
  * Catalogue-derived (recomputed each seed), keyed by entryKey. Consumed by the
  * front-end's Obtainability zone + filters.
@@ -121,6 +137,8 @@ export interface Obtainability {
   originGames: string[];
   /** Present when the species evolves from another (companion "how" hint). */
   evolveFrom?: EvolveFrom | null;
+  /** Absent/null: Pokémon HOME stores this form. Otherwise where it lives. */
+  keptIn?: KeptIn | null;
 }
 
 /** Entry as served by GET /api/entries: spec §3 shape plus embedded status + specimen + obtainability. */
@@ -137,6 +155,7 @@ export interface StatusPatch {
   method?: string | null;
   notes?: string | null;
   inHome?: boolean;
+  heldIn?: string | null;
 }
 
 export interface EntryFilters {

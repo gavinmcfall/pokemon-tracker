@@ -1,19 +1,36 @@
 /** Name mapping between pokepc/dataset and the tracker. No data import, so
  *  scripts/update-pokepc.ts can use it to generate pokepc-data.ts. */
 
-/** pokepc cartridge id → tracker release id. Others (bank, home, colosseum,
- *  XD, ranch, champions, box) are not games the tracker plans catches in. */
-export const POKEPC_CARTRIDGES: Record<string, string> = {
-  'rb-r': 'red', 'rb-b': 'blue', y: 'yellow', 'gs-g': 'gold', 'gs-s': 'silver', c: 'crystal',
-  'rs-r': 'ruby', 'rs-s': 'sapphire', e: 'emerald', 'frlg-fr': 'firered', 'frlg-lg': 'leafgreen',
-  'dp-d': 'diamond', 'dp-p': 'pearl', pt: 'platinum', 'hgss-hg': 'heartgold', 'hgss-ss': 'soulsilver',
-  'bw-b': 'black', 'bw-w': 'white', 'b2w2-b2': 'black-2', 'b2w2-w2': 'white-2',
-  'xy-x': 'x', 'xy-y': 'y', 'oras-or': 'omega-ruby', 'oras-as': 'alpha-sapphire',
-  'sm-s': 'sun', 'sm-m': 'moon', 'usum-us': 'ultra-sun', 'usum-um': 'ultra-moon',
-  'lgpe-lgp': 'lets-go-pikachu', 'lgpe-lge': 'lets-go-eevee', 'swsh-sw': 'sword', 'swsh-sh': 'shield',
-  'bdsp-bd': 'brilliant-diamond', 'bdsp-sp': 'shining-pearl', la: 'legends-arceus',
-  'sv-s': 'scarlet', 'sv-v': 'violet', lza: 'legends-z-a', go: 'go',
+/** pokepc cartridge id → tracker release ids. Others (bank, home, colosseum,
+ *  XD, ranch, champions, box) are not games the tracker plans catches in.
+ *  pokepc's FireRed/LeafGreen is one cartridge on GBA and Switch (2026); the
+ *  tracker splits them because only the Switch release reaches HOME. */
+export const POKEPC_CARTRIDGES: Record<string, string[]> = {
+  'rb-r': ['red'], 'rb-b': ['blue'], y: ['yellow'], 'gs-g': ['gold'], 'gs-s': ['silver'], c: ['crystal'],
+  'rs-r': ['ruby'], 'rs-s': ['sapphire'], e: ['emerald'],
+  'frlg-fr': ['firered', 'firered-switch'], 'frlg-lg': ['leafgreen', 'leafgreen-switch'],
+  'dp-d': ['diamond'], 'dp-p': ['pearl'], pt: ['platinum'], 'hgss-hg': ['heartgold'], 'hgss-ss': ['soulsilver'],
+  'bw-b': ['black'], 'bw-w': ['white'], 'b2w2-b2': ['black-2'], 'b2w2-w2': ['white-2'],
+  'xy-x': ['x'], 'xy-y': ['y'], 'oras-or': ['omega-ruby'], 'oras-as': ['alpha-sapphire'],
+  'sm-s': ['sun'], 'sm-m': ['moon'], 'usum-us': ['ultra-sun'], 'usum-um': ['ultra-moon'],
+  'lgpe-lgp': ['lets-go-pikachu'], 'lgpe-lge': ['lets-go-eevee'], 'swsh-sw': ['sword'], 'swsh-sh': ['shield'],
+  'bdsp-bd': ['brilliant-diamond'], 'bdsp-sp': ['shining-pearl'], la: ['legends-arceus'],
+  'sv-s': ['scarlet'], 'sv-v': ['violet'], lza: ['legends-z-a'], go: ['go'],
 };
+
+/**
+ * Where a form can be kept, from pokepc's `storableIn` and `isBattleOnlyForm`:
+ * `home` — Pokémon HOME stores it (most forms); `save` — HOME can't (fusions
+ * and held-item forms revert or are refused), so it lives in a game save;
+ * `battle` — it only exists mid-battle, so what you keep is the base form plus
+ * the item that triggers it, in a game that can.
+ */
+export type PokepcStorage = 'home' | 'save' | 'battle';
+
+export function pokepcStorage(storableIn: string[] | undefined, battleOnly: boolean): PokepcStorage {
+  if (battleOnly) return 'battle';
+  return (storableIn ?? []).includes('home') ? 'home' : 'save';
+}
 
 /**
  * The species prefix of a dex number's pokepc record ids: the hyphen segments

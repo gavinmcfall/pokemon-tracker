@@ -309,6 +309,16 @@ test('detail sheet: opens via ⋯, edits metadata, persists across reload', asyn
   await expect(panel2.locator('input[list="dex-method-suggestions"]')).toHaveValue('bred');
   await expect(panel2.locator('textarea')).toHaveValue('shiny after 300 eggs');
   await expect(panel2.locator('button[aria-pressed="true"]').first()).toBeVisible();
+
+  // A mega can't sit in HOME: the sheet explains that and asks which save
+  // holds it instead of offering the HOME toggle. The choice persists.
+  await expect(panel2.locator('.sheet-section.obtain')).toContainText('Battle-only form');
+  await expect(panel2.locator('.home-toggle')).toHaveCount(0);
+  await panel2.locator('select.kept-in').selectOption('blue');
+  await page.reload();
+  await expect(page.locator(gridButton).first()).toBeVisible();
+  await page.locator(`${mega} ~ .tile-info`).click();
+  await expect(page.locator('.sheet-panel select.kept-in')).toHaveValue('blue');
 });
 
 test('specimen: caught Vivillon shows shiny/event/6IV badges and a Best Specimen zone', async ({ page }) => {

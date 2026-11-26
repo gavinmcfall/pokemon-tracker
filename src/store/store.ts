@@ -94,6 +94,8 @@ export function applyStatusPatch(existing: Status | null, patch: StatusPatch, no
     // Releasing a catch clears its transfer state — inHome only means
     // something while caught.
     inHome: !patch.caught ? true : patch.inHome !== undefined ? patch.inHome : (existing?.inHome ?? true),
+    // Likewise which save holds a HOME-unstorable form.
+    heldIn: !patch.caught ? null : patch.heldIn !== undefined ? patch.heldIn : (existing?.heldIn ?? null),
   };
 }
 

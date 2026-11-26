@@ -321,10 +321,11 @@ input::placeholder, textarea::placeholder { color: light-dark(#5A6472, #8B94A4);
 }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; color: light-dark(#5A6472, #8B94A4); }
-.field input, .field textarea {
+.field input, .field textarea, .field select {
   border-radius: 10px; border: 1.5px solid light-dark(#D3D9E0, #2E3742);
   background: light-dark(#FFFFFF, #1B2027); color: light-dark(#1B1F24, #E7ECF2);
 }
+.field select { min-height: 44px; padding: 0 10px; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; }
 .field input { min-height: 44px; padding: 0 12px; font-family: 'IBM Plex Mono', monospace; font-size: 13.5px; }
 .field textarea { padding: 10px 12px; font-family: 'Atkinson Hyperlegible', system-ui, sans-serif; font-size: 14px; line-height: 1.5; resize: vertical; min-height: 64px; }
 .field-grid { display: grid; gap: 10px; }
